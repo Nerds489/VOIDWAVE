@@ -18,6 +18,69 @@ set -euo pipefail
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 #═══════════════════════════════════════════════════════════════════════════════
+# IMMUTABLE/SPECIAL SYSTEM DETECTION
+#═══════════════════════════════════════════════════════════════════════════════
+
+IS_IMMUTABLE=0
+IS_STEAMDECK=0
+IS_WSL=0
+
+# Detect immutable systems (SteamOS, Silverblue, Bazzite, etc.)
+_detect_immutable() {
+    # Check for SteamOS/Bazzite/ChimeraOS
+    if [[ -f /etc/os-release ]]; then
+        local os_id
+        os_id=$(sed -n 's/^ID=//p' /etc/os-release | tr -d '"')
+        case "$os_id" in
+            steamos|bazzite|chimeraos|vanilla|blendos)
+                IS_IMMUTABLE=1
+                [[ "$os_id" == "steamos" || "$os_id" == "bazzite" ]] && IS_STEAMDECK=1
+                return 0
+                ;;
+        esac
+    fi
+
+    # Check for rpm-ostree (Silverblue, Kinoite, etc.)
+    if command -v rpm-ostree &>/dev/null; then
+        IS_IMMUTABLE=1
+        return 0
+    fi
+
+    # Check for ostree
+    if [[ -d /ostree ]] || [[ -d /sysroot/ostree ]]; then
+        IS_IMMUTABLE=1
+        return 0
+    fi
+
+    # Check for NixOS
+    if [[ -f /etc/NIXOS ]] || [[ -d /nix/store ]]; then
+        IS_IMMUTABLE=1
+        return 0
+    fi
+
+    # Check for read-only root
+    if grep -q " / .*\bro\b" /proc/mounts 2>/dev/null; then
+        IS_IMMUTABLE=1
+        return 0
+    fi
+
+    return 1
+}
+
+# Detect WSL
+_detect_wsl() {
+    if [[ -f /proc/version ]] && grep -qiE "(microsoft|wsl)" /proc/version 2>/dev/null; then
+        IS_WSL=1
+        return 0
+    fi
+    if [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
+        IS_WSL=1
+        return 0
+    fi
+    return 1
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
 # ARGUMENT PARSING
 #═══════════════════════════════════════════════════════════════════════════════
 
@@ -137,11 +200,27 @@ _dir_in_path() {
 # Select the install root directory
 # Sets: INSTALL_ROOT, BIN_DIR
 _select_install_locations() {
+    # Detect special systems first
+    _detect_immutable || true
+    _detect_wsl || true
+
+    # Force user install on immutable systems
+    if [[ $IS_IMMUTABLE -eq 1 ]] && [[ $OPT_USER -eq 0 ]]; then
+        _warn "Immutable system detected (SteamOS/Silverblue/etc.)"
+        _warn "Forcing user-mode installation to ~/.local/share/voidwave"
+        OPT_USER=1
+    fi
+
     if [[ $OPT_USER -eq 1 ]] || ! _is_root; then
         # User install
         INSTALL_ROOT="${HOME}/.local/share/voidwave"
         BIN_DIR="${HOME}/.local/bin"
         _log "User install mode selected"
+
+        # Special handling for Steam Deck
+        if [[ $IS_STEAMDECK -eq 1 ]]; then
+            _log "Steam Deck detected - using optimized user install"
+        fi
     else
         # System install - try locations in priority order
         local -a roots=("/opt/voidwave" "/usr/local/lib/voidwave" "/usr/lib/voidwave")
@@ -155,23 +234,26 @@ _select_install_locations() {
         done
 
         if [[ -z "$INSTALL_ROOT" ]]; then
-            _error "Cannot find writable system directory for installation"
-            _error "Tried: ${roots[*]}"
-            _error "Run with --user for user-local install, or fix permissions"
-            exit 1
-        fi
-
-        # Select bin directory
-        if _is_writable "/usr/local/bin" || [[ ! -d "/usr/local/bin" ]]; then
-            BIN_DIR="/usr/local/bin"
-        elif _is_writable "/usr/bin"; then
-            BIN_DIR="/usr/bin"
+            # Fallback to user install instead of failing
+            _warn "Cannot write to system directories, falling back to user install"
+            INSTALL_ROOT="${HOME}/.local/share/voidwave"
+            BIN_DIR="${HOME}/.local/bin"
+            OPT_USER=1
+            _log "User install mode selected (fallback)"
         else
-            _error "Cannot find writable bin directory (/usr/local/bin or /usr/bin)"
-            exit 1
-        fi
+            # Select bin directory
+            if _is_writable "/usr/local/bin" || [[ ! -d "/usr/local/bin" ]]; then
+                BIN_DIR="/usr/local/bin"
+            elif _is_writable "/usr/bin"; then
+                BIN_DIR="/usr/bin"
+            else
+                # Fallback to user bin
+                _warn "Cannot write to system bin directories, using user bin"
+                BIN_DIR="${HOME}/.local/bin"
+            fi
 
-        _log "System install mode selected"
+            _log "System install mode selected"
+        fi
     fi
 
     _log "Install root: $INSTALL_ROOT"
@@ -403,30 +485,101 @@ WRAPPER
         chmod 755 "$BIN_DIR/voidwave-install"
     fi
 
-    # Handle PATH for user installs
-    if [[ $OPT_USER -eq 1 ]] || ! _is_root; then
-        if ! _dir_in_path "$BIN_DIR"; then
-            _warn "$BIN_DIR is not in your PATH"
-            _warn "Add to your shell rc file:"
-            _warn "  export PATH=\"$BIN_DIR:\$PATH\""
-        fi
-    else
-        # System install - create profile.d drop-in if needed
-        if ! _dir_in_path "$BIN_DIR"; then
-            if [[ -d "/etc/profile.d" ]] && _is_writable "/etc/profile.d"; then
-                _log "Creating PATH drop-in: /etc/profile.d/voidwave.sh"
-                cat > "/etc/profile.d/voidwave.sh" << DROPIN
+    # Handle PATH configuration
+    _setup_path_config
+}
+
+# Setup PATH configuration using best available method
+_setup_path_config() {
+    if _dir_in_path "$BIN_DIR"; then
+        _log "PATH already includes $BIN_DIR"
+        return 0
+    fi
+
+    local path_configured=0
+
+    # For system installs with writable profile.d
+    if [[ $OPT_USER -eq 0 ]] && _is_root && [[ -d "/etc/profile.d" ]] && _is_writable "/etc/profile.d"; then
+        _log "Creating PATH drop-in: /etc/profile.d/voidwave.sh"
+        cat > "/etc/profile.d/voidwave.sh" << DROPIN
 # Added by VOIDWAVE installer
 if [[ ":\$PATH:" != *":$BIN_DIR:"* ]]; then
     export PATH="$BIN_DIR:\$PATH"
 fi
 DROPIN
-                chmod 644 "/etc/profile.d/voidwave.sh"
-            fi
-        fi
+        chmod 644 "/etc/profile.d/voidwave.sh"
+        path_configured=1
     fi
 
+    # For user installs or when profile.d is not writable, configure shell rc files
+    if [[ $path_configured -eq 0 ]]; then
+        _configure_shell_rc_path
+    fi
+}
+
+# Configure PATH in user's shell rc files
+_configure_shell_rc_path() {
+    local path_line="export PATH=\"$BIN_DIR:\$PATH\"  # Added by VOIDWAVE"
+    local rc_files=()
+    local configured=0
+
+    # Determine which shell rc files to configure
+    local user_home="${HOME}"
+    if [[ $EUID -eq 0 ]] && [[ -n "${SUDO_USER:-}" ]]; then
+        user_home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    fi
+
+    # Check for common shell rc files
+    [[ -f "$user_home/.bashrc" ]] && rc_files+=("$user_home/.bashrc")
+    [[ -f "$user_home/.zshrc" ]] && rc_files+=("$user_home/.zshrc")
+    [[ -f "$user_home/.profile" ]] && rc_files+=("$user_home/.profile")
+
+    # If no rc files exist, create .bashrc
+    if [[ ${#rc_files[@]} -eq 0 ]]; then
+        rc_files+=("$user_home/.bashrc")
+    fi
+
+    for rc_file in "${rc_files[@]}"; do
+        # Skip if already configured
+        if grep -q "# Added by VOIDWAVE" "$rc_file" 2>/dev/null; then
+            _log "PATH already configured in $rc_file"
+            configured=1
+            continue
+        fi
+
+        # Add PATH configuration
+        _log "Adding PATH to $rc_file"
+        echo "" >> "$rc_file"
+        echo "# VOIDWAVE PATH configuration" >> "$rc_file"
+        echo "if [[ \":\$PATH:\" != *\":$BIN_DIR:\"* ]]; then" >> "$rc_file"
+        echo "    $path_line" >> "$rc_file"
+        echo "fi" >> "$rc_file"
+        configured=1
+    done
+
+    if [[ $configured -eq 1 ]]; then
+        _success "PATH configured in shell rc file(s)"
+        _warn "Run 'source ~/.bashrc' or restart your terminal to apply"
+    else
+        _warn "$BIN_DIR is not in your PATH"
+        _warn "Add this line to your shell rc file manually:"
+        _warn "  $path_line"
+    fi
+}
+
+# Finalize installation
+_finalize_install() {
     _success "Installation complete: $INSTALL_ROOT"
+
+    # Show special system info
+    if [[ $IS_IMMUTABLE -eq 1 ]]; then
+        echo "" >&2
+        _log "Note: Running on immutable system"
+        if [[ $IS_STEAMDECK -eq 1 ]]; then
+            _log "Steam Deck detected - VOIDWAVE installed to user directory"
+            _log "VOIDWAVE will persist across SteamOS updates"
+        fi
+    fi
 }
 
 #═══════════════════════════════════════════════════════════════════════════════
@@ -575,6 +728,9 @@ main() {
     # Verify installation
     _verify_installation
 
+    # Finalize and show completion info
+    _finalize_install
+
     # Run tool installer if args provided
     if [[ ${#TOOL_INSTALL_ARGS[@]} -gt 0 ]]; then
         _log "Running tool installer with args: ${TOOL_INSTALL_ARGS[*]}"
@@ -584,6 +740,15 @@ main() {
     echo "" >&2
     _success "VOIDWAVE installed successfully!"
     _log "Run 'voidwave --help' to get started"
+
+    # Remind about PATH on immutable/user installs
+    if [[ $OPT_USER -eq 1 ]] || [[ $IS_IMMUTABLE -eq 1 ]]; then
+        if ! _dir_in_path "$BIN_DIR"; then
+            echo "" >&2
+            _warn "Remember to restart your terminal or run:"
+            _warn "  source ~/.bashrc"
+        fi
+    fi
 }
 
 main "$@"

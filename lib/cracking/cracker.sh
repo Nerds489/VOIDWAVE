@@ -23,17 +23,74 @@ fi
 # CRACKING CONFIGURATION
 #═══════════════════════════════════════════════════════════════════════════════
 
+# Setup voidwave directories
+crack_setup_dirs() {
+    local voidwave_dir="$HOME/.voidwave"
+    local wordlist_dir="$voidwave_dir/wordlists"
+    local rules_dir="$voidwave_dir/rules"
+
+    mkdir -p "$wordlist_dir" "$rules_dir" 2>/dev/null
+}
+
+# Find wordlist directory
+crack_find_wordlist_dir() {
+    local locations=(
+        "$HOME/.voidwave/wordlists"
+        "/usr/share/wordlists"
+        "/usr/share/seclists/Passwords"
+        "/opt/wordlists"
+        "/usr/local/share/wordlists"
+        "$HOME/wordlists"
+    )
+
+    for loc in "${locations[@]}"; do
+        if [[ -d "$loc" ]]; then
+            echo "$loc"
+            return 0
+        fi
+    done
+
+    # Fallback to default
+    echo "/usr/share/wordlists"
+    return 1
+}
+
+# Find rules directory
+crack_find_rules_dir() {
+    local locations=(
+        "$HOME/.voidwave/rules"
+        "/usr/share/hashcat/rules"
+        "/usr/local/share/hashcat/rules"
+        "/opt/hashcat/rules"
+        "$HOME/hashcat/rules"
+    )
+
+    for loc in "${locations[@]}"; do
+        if [[ -d "$loc" ]]; then
+            echo "$loc"
+            return 0
+        fi
+    done
+
+    # Fallback to default
+    echo "/usr/share/hashcat/rules"
+    return 1
+}
+
+# Setup directories on load
+crack_setup_dirs
+
 # Tool preferences
 declare -g CRACK_PREFERRED_TOOL="${CRACK_PREFERRED_TOOL:-auto}"  # auto, hashcat, john, aircrack
 declare -g CRACK_USE_GPU="${CRACK_USE_GPU:-true}"
 declare -g CRACK_WORKLOAD="${CRACK_WORKLOAD:-3}"  # hashcat workload 1-4
 
 # Wordlists
-declare -g CRACK_WORDLIST_DIR="${CRACK_WORDLIST_DIR:-/usr/share/wordlists}"
+declare -g CRACK_WORDLIST_DIR="${CRACK_WORDLIST_DIR:-$(crack_find_wordlist_dir)}"
 declare -g CRACK_DEFAULT_WORDLIST="${CRACK_DEFAULT_WORDLIST:-rockyou.txt}"
 
 # Rules
-declare -g CRACK_RULES_DIR="${CRACK_RULES_DIR:-/usr/share/hashcat/rules}"
+declare -g CRACK_RULES_DIR="${CRACK_RULES_DIR:-$(crack_find_rules_dir)}"
 declare -g CRACK_DEFAULT_RULES="${CRACK_DEFAULT_RULES:-best64.rule}"
 
 # Process tracking
@@ -652,6 +709,7 @@ register_cleanup crack_cleanup
 # EXPORTS
 #═══════════════════════════════════════════════════════════════════════════════
 
+export -f crack_setup_dirs crack_find_wordlist_dir crack_find_rules_dir
 export -f crack_detect_gpu crack_get_device_opts crack_get_tool
 export -f crack_find_wordlist crack_list_wordlists crack_generate_wordlist
 export -f crack_hashcat crack_hashcat_smart

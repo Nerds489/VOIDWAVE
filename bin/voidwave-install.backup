@@ -456,7 +456,7 @@ get_pkg_name() {
                 nix) pkg="aircrack-ng" ;;
                 *) pkg="aircrack-ng" ;;
             esac
-            ;;
+
         reaver)
             case "$DISTRO_FAMILY" in
                 debian|arch) pkg="reaver" ;;
@@ -961,16 +961,6 @@ pkg_update() {
 }
 
 # Install package via native package manager
-# Returns: 0 on success, 1 on failure
-pkg_install() {
-    local package="$1"
-    [[ -z "$package" ]] && return 1
-
-    if [[ $DRY_RUN -eq 1 ]]; then
-        _debug "DRY-RUN: Would install package: $package"
-        return 0
-    fi
-
     # In user install mode, skip package manager on Arch-based systems
     # and rely on pip/go/cargo instead
     if [[ $USER_INSTALL_MODE -eq 1 ]]; then
@@ -982,6 +972,16 @@ pkg_install() {
         fi
         # For other systems in user mode, skip package manager entirely
         return 1
+    fi
+
+# Returns: 0 on success, 1 on failure
+pkg_install() {
+    local package="$1"
+    [[ -z "$package" ]] && return 1
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        _debug "DRY-RUN: Would install package: $package"
+        return 0
     fi
 
     case "$PKG_MANAGER" in
@@ -1095,10 +1095,10 @@ pipx_install() {
     pipx install "$package" 2>/dev/null
 }
 
+    local binary="${tool}"
 # Install via go install
 go_install() {
     local tool="$1"
-    local binary="${tool}"
     local go_pkg="${GO_PACKAGES[$tool]:-}"
 
     [[ -z "$go_pkg" ]] && return 1
@@ -1107,6 +1107,7 @@ go_install() {
     command -v go &>/dev/null || return 1
 
     if [[ $DRY_RUN -eq 1 ]]; then
+        _debug "DRY-RUN: Would go install: $go_pkg"
         return 0
     fi
 
@@ -1170,7 +1171,6 @@ cargo_install() {
             [[ -f "${HOME}/.cargo/bin/$tool" ]] && return 0
             return 1
         fi
-    fi
 
     return 1
 }
@@ -1777,47 +1777,6 @@ create_manual_guide() {
 # VOIDWAVE Manual Installation Guide
 Generated: $(date '+%Y-%m-%d %H:%M:%S')
 System: ${DISTRO^} (${PKG_MANAGER})
-EOF
-
-    # Add immutable system section if applicable
-    if [[ $IS_IMMUTABLE -eq 1 ]]; then
-        cat >> "$guide_file" << 'EOF'
-Immutable System: YES
-
-## Immutable System Detected
-
-Your system has a read-only root filesystem. For persistent tool installations:
-
-### Option 1: Distrobox (Recommended)
-```bash
-# Install distrobox if not available
-curl -s https://raw.githubusercontent.com/89luca89/distrobox/main/install | sh -s -- --prefix ~/.local
-
-# Create a container for pentesting tools
-distrobox create --name pentest --image archlinux
-
-# Enter the container
-distrobox enter pentest
-
-# Install tools inside the container (they persist across updates)
-sudo pacman -S nmap metasploit hashcat john
-```
-
-### Option 2: Install to ~/.local
-Tools installed to ~/.local/bin will persist across system updates:
-```bash
-# Add to your PATH if needed
-export PATH="$HOME/.local/bin:$PATH"
-
-# Use pip/cargo/go with --user or install to ~/.local
-pip3 install --user theHarvester
-cargo install rustscan
-```
-
-EOF
-    fi
-
-    cat >> "$guide_file" << EOF
 
 ## Failed Tools
 

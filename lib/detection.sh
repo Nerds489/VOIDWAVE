@@ -69,6 +69,12 @@ declare -g PKG_UPDATE=""
 declare -g PKG_SEARCH=""
 declare -g PKG_REMOVE=""
 
+# Special system flags
+declare -g IS_IMMUTABLE=0      # Immutable root filesystem (SteamOS, Silverblue, etc.)
+declare -g IS_WSL=0            # Windows Subsystem for Linux
+declare -g IS_CONTAINER=0      # Running in Docker/Podman/LXC
+declare -g IS_STEAMDECK=0      # Steam Deck specifically
+
 #═══════════════════════════════════════════════════════════════════════════════
 # DISTRIBUTION DETECTION
 #═══════════════════════════════════════════════════════════════════════════════
@@ -102,6 +108,163 @@ detect_distro() {
     echo "${distro:-unknown}"
 }
 
+#═══════════════════════════════════════════════════════════════════════════════
+# SPECIAL ENVIRONMENT DETECTION
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Detect if running on an immutable/atomic Linux distribution
+# Sets IS_IMMUTABLE=1 if true
+# Immutable distros: SteamOS, Fedora Silverblue/Kinoite, VanillaOS, Bazzite, etc.
+detect_immutable_system() {
+    IS_IMMUTABLE=0
+    IS_STEAMDECK=0
+
+    # Method 1: Check for SteamOS specifically
+    if [[ -f /etc/os-release ]]; then
+        local os_id os_variant
+        os_id=$(sed -n 's/^ID=//p' /etc/os-release | tr -d '"')
+        os_variant=$(sed -n 's/^VARIANT_ID=//p' /etc/os-release | tr -d '"')
+
+        # SteamOS 3.x (Steam Deck)
+        if [[ "$os_id" == "steamos" ]]; then
+            IS_IMMUTABLE=1
+            IS_STEAMDECK=1
+            return 0
+        fi
+
+        # Bazzite (Steam Deck alternative)
+        if [[ "$os_id" == "bazzite" ]]; then
+            IS_IMMUTABLE=1
+            IS_STEAMDECK=1
+            return 0
+        fi
+
+        # ChimeraOS (another Steam Deck-like distro)
+        if [[ "$os_id" == "chimeraos" ]]; then
+            IS_IMMUTABLE=1
+            return 0
+        fi
+    fi
+
+    # Method 2: Check for rpm-ostree based systems (Silverblue, Kinoite, etc.)
+    if command -v rpm-ostree &>/dev/null; then
+        IS_IMMUTABLE=1
+        return 0
+    fi
+
+    # Method 3: Check for ostree deployments
+    if [[ -d /ostree ]] || [[ -d /sysroot/ostree ]]; then
+        IS_IMMUTABLE=1
+        return 0
+    fi
+
+    # Method 4: Check for read-only root filesystem
+    if [[ -f /etc/os-release ]]; then
+        local os_id
+        os_id=$(sed -n 's/^ID=//p' /etc/os-release | tr -d '"')
+
+        # VanillaOS, blendOS
+        case "$os_id" in
+            vanilla|blendos|carbonos)
+                IS_IMMUTABLE=1
+                return 0
+                ;;
+        esac
+    fi
+
+    # Method 5: Check for NixOS (also immutable in a sense)
+    if [[ -f /etc/NIXOS ]] || [[ -d /nix/store ]]; then
+        IS_IMMUTABLE=1
+        return 0
+    fi
+
+    # Method 6: Check if root is actually read-only mounted
+    if grep -q " / .*\bro\b" /proc/mounts 2>/dev/null; then
+        IS_IMMUTABLE=1
+        return 0
+    fi
+
+    return 1
+}
+
+# Detect if running in WSL (Windows Subsystem for Linux)
+detect_wsl() {
+    IS_WSL=0
+
+    # Method 1: Check /proc/version for Microsoft/WSL
+    if [[ -f /proc/version ]]; then
+        if grep -qiE "(microsoft|wsl)" /proc/version 2>/dev/null; then
+            IS_WSL=1
+            return 0
+        fi
+    fi
+
+    # Method 2: Check for WSL-specific files
+    if [[ -f /proc/sys/fs/binfmt_misc/WSLInterop ]]; then
+        IS_WSL=1
+        return 0
+    fi
+
+    # Method 3: Check WSL environment variable
+    if [[ -n "${WSL_DISTRO_NAME:-}" ]] || [[ -n "${WSL_INTEROP:-}" ]]; then
+        IS_WSL=1
+        return 0
+    fi
+
+    return 1
+}
+
+# Detect if running in a container (Docker, Podman, LXC)
+detect_container() {
+    IS_CONTAINER=0
+
+    # Method 1: Check for /.dockerenv
+    if [[ -f /.dockerenv ]]; then
+        IS_CONTAINER=1
+        return 0
+    fi
+
+    # Method 2: Check cgroup for container indicators
+    if [[ -f /proc/1/cgroup ]]; then
+        if grep -qE "(docker|lxc|kubepods|libpod)" /proc/1/cgroup 2>/dev/null; then
+            IS_CONTAINER=1
+            return 0
+        fi
+    fi
+
+    # Method 3: Check for container environment variable
+    if [[ -n "${container:-}" ]]; then
+        IS_CONTAINER=1
+        return 0
+    fi
+
+    # Method 4: Check for podman
+    if [[ -f /run/.containerenv ]]; then
+        IS_CONTAINER=1
+        return 0
+    fi
+
+    return 1
+}
+
+# Check if system path is writable (for install decisions)
+# Returns 0 if system install is possible, 1 if user-only install
+can_system_install() {
+    # Immutable systems should use user install
+    if [[ $IS_IMMUTABLE -eq 1 ]]; then
+        return 1
+    fi
+
+    # Check if we're root and /opt or /usr/local is writable
+    if [[ $EUID -eq 0 ]]; then
+        if [[ -w "/opt" ]] || [[ -w "/usr/local/bin" ]]; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
 # Detect distro family
 # Args: $1 = distro name
 # Returns: family name (debian, redhat, arch, etc.)
@@ -109,28 +272,62 @@ detect_distro_family() {
     local distro="${1:-$(detect_distro)}"
 
     case "$distro" in
-        debian|ubuntu|kali|parrot|linuxmint|pop|elementary|zorin|mx)
+        # Debian family
+        debian|ubuntu|kali|parrot|linuxmint|pop|elementary|zorin|mx|raspbian|devuan|deepin|pureos)
             echo "debian"
             ;;
-        fedora|rhel|centos|rocky|alma|oracle|amazon)
+        # Red Hat family (including immutable variants)
+        fedora|rhel|centos|rocky|alma|oracle|amazon|nobara|ultramarine|silverblue|kinoite|sericea|onyx)
             echo "redhat"
             ;;
-        arch|manjaro|endeavouros|blackarch|arcolinux|garuda)
+        # Arch family (including SteamOS which is Arch-based)
+        arch|manjaro|endeavouros|blackarch|arcolinux|garuda|artix|cachyos|steamos|bazzite|chimeraos)
             echo "arch"
             ;;
-        opensuse*|suse|sles)
+        # SUSE family
+        opensuse*|suse|sles|opensuse-leap|opensuse-tumbleweed|opensuse-microos|aeon|kalpa)
             echo "suse"
             ;;
-        alpine)
+        # Alpine family
+        alpine|postmarketos)
             echo "alpine"
             ;;
-        gentoo|funtoo)
+        # Gentoo family
+        gentoo|funtoo|calculate)
             echo "gentoo"
             ;;
+        # Void Linux
         void)
             echo "void"
             ;;
+        # NixOS family
+        nixos)
+            echo "nix"
+            ;;
+        # Solus
+        solus)
+            echo "solus"
+            ;;
+        # VanillaOS and similar (uses apt but immutable)
+        vanilla|blendos)
+            echo "debian"
+            ;;
+        # ChromeOS/Crostini (Debian-based container)
+        chromeos|cros)
+            echo "debian"
+            ;;
         *)
+            # Try to determine family from ID_LIKE in os-release
+            if [[ -f /etc/os-release ]]; then
+                local id_like
+                id_like=$(sed -n 's/^ID_LIKE=//p' /etc/os-release | tr -d '"')
+                case "$id_like" in
+                    *debian*|*ubuntu*)   echo "debian"; return ;;
+                    *rhel*|*fedora*)     echo "redhat"; return ;;
+                    *arch*)              echo "arch"; return ;;
+                    *suse*)              echo "suse"; return ;;
+                esac
+            fi
             echo "unknown"
             ;;
     esac
@@ -902,7 +1099,18 @@ detect_system() {
     DISTRO_FAMILY=$(detect_distro_family "$DISTRO")
     setup_package_manager
 
-    log_debug "System detected: $DISTRO ($DISTRO_FAMILY) with $PKG_MANAGER"
+    # Detect special environments
+    detect_immutable_system
+    detect_wsl
+    detect_container
+
+    local extra_info=""
+    [[ $IS_IMMUTABLE -eq 1 ]] && extra_info+=" [IMMUTABLE]"
+    [[ $IS_STEAMDECK -eq 1 ]] && extra_info+=" [STEAMDECK]"
+    [[ $IS_WSL -eq 1 ]] && extra_info+=" [WSL]"
+    [[ $IS_CONTAINER -eq 1 ]] && extra_info+=" [CONTAINER]"
+
+    log_debug "System detected: $DISTRO ($DISTRO_FAMILY) with $PKG_MANAGER${extra_info}"
 }
 
 #═══════════════════════════════════════════════════════════════════════════════
@@ -911,6 +1119,9 @@ detect_system() {
 
 # Distribution detection
 export -f detect_distro detect_distro_family
+
+# Special environment detection
+export -f detect_immutable_system detect_wsl detect_container can_system_install
 
 # Package manager
 export -f detect_package_manager setup_package_manager
@@ -938,3 +1149,4 @@ export -f detect_system
 # Export variables
 export DISTRO DISTRO_FAMILY
 export PKG_MANAGER PKG_INSTALL PKG_UPDATE PKG_SEARCH PKG_REMOVE
+export IS_IMMUTABLE IS_WSL IS_CONTAINER IS_STEAMDECK

@@ -32,7 +32,7 @@
 
 ```bash
 # Install
-git clone https://github.com/YOURUSER/voidwave.git && cd voidwave && sudo ./install.sh
+git clone https://github.com/Nerds489/voidwave.git && cd voidwave && sudo ./install.sh
 
 # Install tools
 sudo voidwave-install essentials    # Core tools

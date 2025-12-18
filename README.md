@@ -39,8 +39,8 @@ sudo voidwave-install essentials    # Core tools
 sudo voidwave-install all           # Full arsenal
 
 # Launch
-voidwave                            # Interactive mode
-voidwave scan nmap 192.168.1.0/24   # Direct CLI
+sudo voidwave                            # Interactive mode
+sudo voidwave scan nmap 192.168.1.0/24   # Direct CLI
 ```
 
 ---
@@ -64,25 +64,25 @@ voidwave scan nmap 192.168.1.0/24   # Direct CLI
 
 ```bash
 # Wireless
-voidwave wireless scan                     # Discover networks
-voidwave wireless capture <BSSID> <CH>     # Capture handshake
-voidwave wireless deauth <BSSID>           # Deauthentication
+sudo voidwave wireless scan                     # Discover networks
+sudo voidwave wireless capture <BSSID> <CH>     # Capture handshake
+sudo voidwave wireless deauth <BSSID>           # Deauthentication
 
 # Scanning
-voidwave scan nmap -sV target.com          # Service detection
-voidwave scan masscan 10.0.0.0/8 -p80,443  # Fast port scan
+sudo voidwave scan nmap -sV target.com          # Service detection
+sudo voidwave scan masscan 10.0.0.0/8 -p80,443  # Fast port scan
 
 # Credentials
-voidwave creds hashcat hash.txt rockyou.txt
-voidwave creds hydra ssh://target -l root -P wordlist.txt
+sudo voidwave creds hashcat hash.txt rockyou.txt
+sudo voidwave creds hydra ssh://target -l root -P wordlist.txt
 
 # OSINT
-voidwave osint theharvester -d target.com
-voidwave osint shodan search "port:22"
+sudo voidwave osint theharvester -d target.com
+sudo voidwave osint shodan search "port:22"
 
 # Session management
-voidwave session new engagement-01
-voidwave memory show
+sudo voidwave session new engagement-01
+sudo voidwave memory show
 ```
 
 <details>
@@ -106,10 +106,10 @@ voidwave memory show
 VOIDWAVE tracks discovered targets across your engagement:
 
 ```bash
-voidwave memory show              # View all remembered items
-voidwave memory show wireless     # View discovered APs
-voidwave memory add host 10.0.0.5 "Domain Controller"
-voidwave memory clear
+sudo voidwave memory show              # View all remembered items
+sudo voidwave memory show wireless     # View discovered APs
+sudo voidwave memory add host 10.0.0.5 "Domain Controller"
+sudo voidwave memory clear
 ```
 
 Memory types: `network`, `host`, `interface`, `wireless`

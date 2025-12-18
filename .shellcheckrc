@@ -1,0 +1,3 @@
+# ShellCheck configuration
+# SC1091: Can't follow sourced files (expected in modular design)
+disable=SC1091

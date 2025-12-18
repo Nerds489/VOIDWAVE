@@ -1,0 +1,972 @@
+#!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════════════════════════════
+# VOIDWAVE - Network Security & WiFi Assault Toolkit
+# ═══════════════════════════════════════════════════════════════════════════════
+# Copyright (c) 2025 Nerds489
+# SPDX-License-Identifier: Apache-2.0
+#
+# Thin dispatcher: sources libraries and modules, then routes to handlers.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+set -euo pipefail
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PRE-INIT: Suppress output for config get (must be set before sourcing libs)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# For "config get <key>", suppress ALL output (logs, init messages) so that
+# only the raw value is printed to stdout. This ensures BATS tests pass.
+if [[ "${1:-}" == "config" && "${2:-}" == "get" && -n "${3:-}" ]]; then
+    export NR_SUPPRESS_OUTPUT=1
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SOURCE LIBRARIES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Resolve VOIDWAVE_ROOT (parent of bin/)
+VOIDWAVE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export VOIDWAVE_ROOT
+
+# Source version helper first (provides VOIDWAVE_ROOT and VERSION)
+# shellcheck source=../lib/version.sh
+source "$VOIDWAVE_ROOT/lib/version.sh"
+
+# Source core libraries in dependency order
+# Each lib has a guard to prevent multiple sourcing
+for lib in core ui safety detection config utils wireless wizards sessions memory; do
+    # shellcheck source=/dev/null
+    source "$VOIDWAVE_ROOT/lib/${lib}.sh" || {
+        echo "ERROR: Failed to source lib/${lib}.sh" >&2
+        exit 1
+    }
+done
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SOURCE MODULES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Source all modules (each has its own guard)
+for mod in "$VOIDWAVE_ROOT/modules"/*.sh; do
+    [[ -f "$mod" ]] && source "$mod"
+done
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# INITIALIZATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Create required directories (from core.sh)
+ensure_directories
+
+# Initialize configuration system (from config.sh)
+init_config
+
+# Apply configuration to runtime behavior
+# Performance: Uses direct CONFIG array access instead of config_get subshells
+# The CONFIG associative array is populated by init_config -> load_config
+_apply_config() {
+    local cfg_value=""
+
+    # Apply log_level from config (direct array access, no subshell)
+    cfg_value="${CONFIG[log_level]:-}"
+    if [[ -n "$cfg_value" ]]; then
+        case "${cfg_value^^}" in
+            DEBUG|INFO|SUCCESS|WARNING|ERROR|FATAL)
+                set_log_level "$cfg_value"
+                ;;
+        esac
+    fi
+
+    # Apply file_logging from config
+    cfg_value="${CONFIG[file_logging]:-}"
+    if [[ -n "$cfg_value" ]]; then
+        if config_is_true "$cfg_value"; then
+            FILE_LOGGING=1
+        else
+            FILE_LOGGING=0
+        fi
+    fi
+
+    # Apply confirm_dangerous from config (interactive mode only)
+    # Note: This only affects interactive confirmations, not safety gates
+    cfg_value="${CONFIG[confirm_dangerous]:-}"
+    if [[ -n "$cfg_value" ]]; then
+        if config_is_true "$cfg_value"; then
+            export NR_CONFIRM_DANGEROUS=1
+        else
+            export NR_CONFIRM_DANGEROUS=0
+        fi
+    fi
+
+    # Apply warn_public_ip from config
+    cfg_value="${CONFIG[warn_public_ip]:-}"
+    if [[ -n "$cfg_value" ]]; then
+        if config_is_true "$cfg_value"; then
+            export NR_WARN_PUBLIC_IP=1
+        else
+            export NR_WARN_PUBLIC_IP=0
+        fi
+    fi
+}
+_apply_config
+
+# Detect system info (from detection.sh)
+detect_system
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GLOBAL FLAGS
+# ═══════════════════════════════════════════════════════════════════════════════
+declare -g DRY_RUN=0
+declare -g JSON_OUTPUT=0
+declare -g QUIET_MODE=0
+declare -g VERBOSE_MODE=0
+declare -g TARGET=""
+declare -ga REMAINING_ARGS=()
+
+parse_global_flags() {
+    REMAINING_ARGS=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run|-n)
+                DRY_RUN=1
+                shift
+                ;;
+            --json|-j)
+                JSON_OUTPUT=1
+                QUIET_MODE=1
+                shift
+                ;;
+            --quiet|-q)
+                QUIET_MODE=1
+                [[ -n "${LOG_LEVEL_ERROR:-}" ]] && CURRENT_LOG_LEVEL=$LOG_LEVEL_ERROR
+                shift
+                ;;
+            --verbose|-v)
+                VERBOSE_MODE=1
+                [[ -n "${LOG_LEVEL_DEBUG:-}" ]] && CURRENT_LOG_LEVEL=$LOG_LEVEL_DEBUG
+                shift
+                ;;
+            --version|-V)
+                echo "voidwave v${VERSION:-unknown}"
+                exit 0
+                ;;
+            --help|-h)
+                show_help
+                exit 0
+                ;;
+            -i|--interactive)
+                if [[ -f "$VOIDWAVE_ROOT/lib/menu.sh" ]]; then
+                    source "$VOIDWAVE_ROOT/lib/menu.sh"
+                    run_interactive
+                    exit $?
+                else
+                    echo "Error: Menu module not found"
+                    exit 1
+                fi
+                ;;
+            --target|-t)
+                shift
+                [[ $# -eq 0 ]] && { echo "Error: --target requires argument"; exit 1; }
+                TARGET="$1"
+                shift
+                ;;
+            --output|-o)
+                shift
+                [[ $# -eq 0 ]] && { echo "Error: --output requires argument"; exit 1; }
+                VOIDWAVE_OUTPUT_DIR="$1"
+                export VOIDWAVE_OUTPUT_DIR
+                shift
+                ;;
+            --*)
+                echo "Error: Unknown option: $1"
+                echo "Run 'voidwave --help' for usage"
+                exit 1
+                ;;
+            *)
+                # Non-option argument (command or subcommand)
+                # Stop global option parsing, let command handle the rest
+                REMAINING_ARGS+=("$@")
+                break
+                ;;
+        esac
+    done
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CLI HELPERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Check if dry-run mode — use before destructive operations
+is_dry_run() {
+    [[ "$DRY_RUN" == "1" ]]
+}
+
+# Wrap command execution — skips in dry-run mode
+execute() {
+    if is_dry_run; then
+        echo -e "    ${C_YELLOW:-}[DRY-RUN]${C_RESET:-} $*"
+        return 0
+    fi
+    "$@"
+}
+
+# Output JSON if --json flag set
+json_out() {
+    [[ "$JSON_OUTPUT" == "1" ]] && echo "$1" || true
+}
+
+# Print only if not in quiet mode
+print_unless_quiet() {
+    [[ "$QUIET_MODE" != "1" ]] && echo -e "$@" || true
+}
+
+# Print only if verbose mode
+print_if_verbose() {
+    [[ "$VERBOSE_MODE" == "1" ]] && echo -e "    ${C_GRAY:-}[DEBUG]${C_RESET:-} $*" || true
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CLI FUNCTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_show_version() {
+    echo "voidwave v${VERSION} (Phantom Protocol)"
+}
+
+show_help() {
+    cat << 'EOF'
+VOIDWAVE — Network Security Assessment Framework
+
+USAGE:
+    voidwave [OPTIONS] <COMMAND> [ARGS...]
+
+OPTIONS:
+    -i, --interactive   Launch interactive menu
+    -n, --dry-run       Show commands without executing
+    -j, --json          Output in JSON format
+    -q, --quiet         Suppress banners and info messages
+    -v, --verbose       Enable debug output
+    -V, --version       Show version and exit
+    -h, --help          Show this help and exit
+    -t, --target <IP>   Specify target IP/CIDR
+    -o, --output <DIR>  Override output directory
+
+COMMANDS:
+    scan        Network scanning (nmap, masscan)
+    wifi        WiFi operations (monitor mode, deauth, capture)
+    stress      Stress testing (hping3, netem)
+    config      Configuration management
+    session     Session management (pause/resume)
+    memory      Session memory management (recent targets)
+    status      Show system and tool status
+    logs        Log viewing and filtering
+    wizard      Guided interactive workflows
+    debug       Interactive debug shell with all libs loaded
+    help        Show this help message
+
+CONFIG SUBCOMMANDS:
+    config show              Show all configuration
+    config get <key>         Get a configuration value
+    config set <key> <val>   Set a configuration value
+    config edit              Edit config file interactively
+    config path              Show config file path
+    config validate          Validate configuration values
+    config reset             Reset to default configuration
+
+WIFI SUBCOMMANDS:
+    wifi list                List wireless interfaces
+    wifi status <iface>      Show interface mode
+    wifi monitor on <iface>  Enable monitor mode
+    wifi monitor off <iface> Disable monitor mode
+
+STRESS SUBCOMMANDS:
+    stress hping <target>    Run hping3 packet flood
+    stress netem <iface>     Apply network impairment
+
+WIZARD SUBCOMMANDS:
+    wizard                   Show wizard selection menu
+    wizard first             First-time setup wizard
+    wizard scan              Guided network scan
+    wizard wifi              Guided WiFi assessment (root)
+
+SESSION SUBCOMMANDS:
+    session list             List all sessions
+    session list --active    List active sessions only
+    session info <id>        Show session details
+    session resume <id>      Resume a session
+    session delete <id>      Delete a session
+    session cleanup [days]   Remove sessions older than N days
+
+MEMORY SUBCOMMANDS:
+    memory show [type]       Show session memory (networks, hosts, APs)
+    memory list [type]       List memory entries
+    memory clear [type]      Clear memory (all, network, host, wireless, interface)
+    memory add <type> <val>  Add entry to memory
+
+LOG SUBCOMMANDS:
+    logs                     Show recent logs (alias for logs show)
+    logs show [N]            Show last N lines (default: 50)
+    logs search <pattern>    Search all logs for pattern
+    logs filter --level LVL  Filter by level (DEBUG/INFO/WARNING/ERROR)
+    logs filter --date DATE  Filter by date (YYYYMMDD format)
+    logs tail [-f]           Tail log, -f to follow in real-time
+    logs list                List available log files
+    logs clear [days]        Delete logs older than N days (default: 7)
+
+ENVIRONMENT VARIABLES:
+    VW_NON_INTERACTIVE=1    Disable all prompts (for CI/scripts)
+    VW_UNSAFE_MODE=1        Bypass safety confirmations
+    VOIDWAVE_LOG_FORMAT     Set to "json" for structured logging
+
+EXAMPLES:
+    voidwave scan -t 192.168.1.0/24
+    voidwave --dry-run wifi monitor on wlan0
+    voidwave --json status
+    voidwave --quiet -o /tmp/results scan 10.0.0.1
+    voidwave -n -t 192.168.1.1 scan
+    voidwave config set log_level DEBUG
+    voidwave logs filter --level ERROR
+    voidwave logs tail -f
+
+EOF
+}
+
+# Legacy alias for compatibility
+_show_help() {
+    show_help
+}
+
+_show_status() {
+    # Show system information first
+    echo
+    echo -e "    ${C_BOLD}${C_CYAN}System Information${C_RESET}"
+    echo -e "    ${C_CYAN}────────────────────────────────────────────────────────────────────────${C_RESET}"
+    log_info "Distribution: ${DISTRO:-unknown} (${DISTRO_FAMILY:-unknown})"
+    log_info "Package manager: ${PKG_MANAGER:-unknown}"
+    log_info "VOIDWAVE root: ${VOIDWAVE_ROOT}"
+    log_info "Config directory: ${CONFIG_DIR}"
+    echo
+
+    # Delegate to tool status display
+    if declare -f show_tool_status &>/dev/null; then
+        show_tool_status
+    else
+        # Fallback: basic tool status display
+        echo -e "    ${C_BOLD}${C_CYAN}Tool Status${C_RESET}"
+        echo -e "    ${C_CYAN}────────────────────────────────────────────────────────────────────────${C_RESET}"
+        log_info "Core tools:"
+        for tool in nmap aircrack-ng hashcat wireshark tcpdump hydra; do
+            if command -v "$tool" &>/dev/null; then
+                echo -e "    ${C_GREEN}✓${C_RESET} $tool"
+            else
+                echo -e "    ${C_RED}✗${C_RESET} $tool"
+            fi
+        done
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════════════════════════════
+
+main() {
+    # Parse flags first — populates REMAINING_ARGS
+    parse_global_flags "$@"
+
+    # Restore positional params from remaining args
+    set -- "${REMAINING_ARGS[@]}"
+
+    # Export DRY_RUN for compatibility with existing code
+    if is_dry_run; then
+        NR_DRY_RUN=1
+        export NR_DRY_RUN
+        print_unless_quiet "    ${C_YELLOW:-}[DRY-RUN MODE]${C_RESET:-} No commands will be executed"
+    fi
+
+    # Verbose mode notice
+    print_if_verbose "VOIDWAVE v${VERSION:-unknown} starting"
+    print_if_verbose "Output directory: ${VOIDWAVE_OUTPUT_DIR:-$VOIDWAVE_ROOT/output}"
+    [[ -n "$TARGET" ]] && print_if_verbose "Target: $TARGET" || true
+
+    # Check first run (skipped in non-interactive/quiet mode)
+    [[ "$QUIET_MODE" != "1" ]] && check_first_run || true
+
+    # No command given - launch interactive menu
+    if [[ $# -eq 0 ]]; then
+        if [[ -f "$VOIDWAVE_ROOT/lib/menu.sh" ]]; then
+            source "$VOIDWAVE_ROOT/lib/menu.sh"
+            menu_loop
+            exit $?
+        else
+            echo "Error: Menu module not found at $VOIDWAVE_ROOT/lib/menu.sh"
+            exit 1
+        fi
+    fi
+
+    # Dispatch command
+    local cmd="$1"
+    shift
+
+    case "$cmd" in
+        help)
+            show_help
+            exit 0
+            ;;
+        config)
+            case "${1:-}" in
+                show)
+                    config_show
+                    exit 0
+                    ;;
+                get)
+                    if [[ -z "${2:-}" ]]; then
+                        log_error "Missing key argument"
+                        echo "Usage: voidwave config get <key>"
+                        exit 1
+                    fi
+                    value=$(config_get "$2") || {
+                        log_error "Key not found: $2"
+                        exit 1
+                    }
+                    # Output raw value only - no formatting, colors, or prefix
+                    printf '%s\n' "$value"
+                    exit 0
+                    ;;
+                set)
+                    if [[ -z "${2:-}" ]] || [[ -z "${3:-}" ]]; then
+                        log_error "Missing key or value argument"
+                        echo "Usage: voidwave config set <key> <value>"
+                        exit 1
+                    fi
+                    config_set "$2" "$3"
+                    exit 0
+                    ;;
+                edit)
+                    config_edit
+                    exit $?
+                    ;;
+                path)
+                    config_path
+                    exit 0
+                    ;;
+                validate)
+                    config_validate
+                    exit $?
+                    ;;
+                reset)
+                    if [[ "${NR_NON_INTERACTIVE:-0}" != "1" ]] && [[ -t 0 ]]; then
+                        if ! confirm "Reset configuration to defaults?" "n"; then
+                            log_info "Reset cancelled"
+                            exit 0
+                        fi
+                    fi
+                    config_reset
+                    exit 0
+                    ;;
+                "")
+                    # No subcommand - show config
+                    config_show
+                    exit 0
+                    ;;
+                *)
+                    log_error "Unknown config subcommand: ${1:-}"
+                    echo "Usage: voidwave config [show|get|set|edit|path|validate|reset]"
+                    exit 1
+                    ;;
+            esac
+            ;;
+        status)
+            _show_status
+            exit 0
+            ;;
+        scan)
+            # Use TARGET from --target flag, or first positional argument
+            local scan_target="${TARGET:-${1:-}}"
+            if declare -f run_nmap_quick &>/dev/null && [[ -n "$scan_target" ]]; then
+                print_if_verbose "Scanning target: $scan_target"
+                run_nmap_quick "$scan_target"
+            elif [[ -z "$scan_target" ]]; then
+                log_error "Missing target. Use --target or provide as argument."
+                echo "Usage: voidwave scan <target>"
+                echo "       voidwave --target <IP> scan"
+                exit 1
+            else
+                log_info "Scan command placeholder - modules not yet migrated"
+            fi
+            exit 0
+            ;;
+        wifi)
+            case "${1:-}" in
+                list)
+                    # List wireless interfaces
+                    get_wireless_interfaces
+                    exit $?
+                    ;;
+                status)
+                    # Show interface monitor mode status
+                    if [[ -z "${2:-}" ]]; then
+                        log_error "Missing interface argument"
+                        echo "Usage: voidwave wifi status <interface>"
+                        exit 1
+                    fi
+                    check_monitor_mode "$2"
+                    exit $?
+                    ;;
+                monitor)
+                    case "${2:-}" in
+                        on)
+                            if [[ -z "${3:-}" ]]; then
+                                log_error "Missing interface argument"
+                                echo "Usage: voidwave wifi monitor on <interface>"
+                                exit 1
+                            fi
+                            enable_monitor_mode "$3"
+                            exit $?
+                            ;;
+                        off)
+                            if [[ -z "${3:-}" ]]; then
+                                log_error "Missing interface argument"
+                                echo "Usage: voidwave wifi monitor off <interface>"
+                                exit 1
+                            fi
+                            disable_monitor_mode "$3"
+                            exit $?
+                            ;;
+                        *)
+                            echo "Usage: voidwave wifi monitor <on|off> <interface>"
+                            exit 1
+                            ;;
+                    esac
+                    ;;
+                "")
+                    # No subcommand - show wifi usage
+                    cat << 'WIFI_HELP'
+VOIDWAVE WiFi Commands
+
+Usage: voidwave wifi <command> [options]
+
+Commands:
+  list                    List wireless interfaces
+  status <iface>          Show interface mode (monitor/managed)
+  monitor on <iface>      Enable monitor mode
+  monitor off <iface>     Disable monitor mode
+
+Examples:
+  voidwave wifi list
+  voidwave wifi status wlan0
+  voidwave wifi monitor on wlan0
+  voidwave wifi monitor off wlan0mon
+WIFI_HELP
+                    exit 0
+                    ;;
+                *)
+                    log_error "Unknown wifi subcommand: ${1:-}"
+                    echo "Usage: voidwave wifi [list|status|monitor]"
+                    exit 1
+                    ;;
+            esac
+            ;;
+        stress)
+            case "${1:-}" in
+                hping)
+                    # voidwave stress hping <target> [port] [type] [duration] [rate]
+                    # Use TARGET from --target flag, or positional argument
+                    local stress_target="${TARGET:-${2:-}}"
+                    if [[ -z "$stress_target" ]]; then
+                        log_error "Missing target argument"
+                        echo "Usage: voidwave stress hping <target> [port] [type] [duration] [rate]"
+                        exit 1
+                    fi
+                    run_hping_attack "$stress_target" "${3:-80}" "${4:-syn}" "${5:-30}" "${6:-1000}"
+                    exit $?
+                    ;;
+                netem)
+                    # voidwave stress netem <iface> [impairment] [value] [duration]
+                    if [[ -z "${2:-}" ]]; then
+                        log_error "Missing interface argument"
+                        echo "Usage: voidwave stress netem <iface> [impairment] [value] [duration]"
+                        exit 1
+                    fi
+                    run_netem "$2" "${3:-delay}" "${4:-100ms}" "${5:-60}"
+                    exit $?
+                    ;;
+                "")
+                    # No subcommand - show stress usage
+                    stress_usage
+                    exit 0
+                    ;;
+                *)
+                    log_error "Unknown stress subcommand: ${1:-}"
+                    echo "Usage: voidwave stress [hping|netem]"
+                    exit 1
+                    ;;
+            esac
+            ;;
+        wizard)
+            local wizard_type="${1:-menu}"
+            shift 2>/dev/null || true
+            case "$wizard_type" in
+                first|setup)
+                    first_run_wizard
+                    exit 0
+                    ;;
+                scan)
+                    scan_wizard
+                    exit $?
+                    ;;
+                wifi)
+                    wifi_wizard
+                    exit $?
+                    ;;
+                menu|"")
+                    local wiz
+                    wiz=$(select_option "Select wizard" "First Run Setup" "Network Scan" "WiFi Assessment")
+                    case "$wiz" in
+                        "First Run Setup") first_run_wizard ;;
+                        "Network Scan")    scan_wizard ;;
+                        "WiFi Assessment") wifi_wizard ;;
+                    esac
+                    exit $?
+                    ;;
+                *)
+                    log_error "Unknown wizard: $wizard_type"
+                    echo "Available: first, scan, wifi"
+                    exit 1
+                    ;;
+            esac
+            ;;
+        session)
+            local subcmd="${1:-list}"
+            shift 2>/dev/null || true
+            case "$subcmd" in
+                list)
+                    session_list "$@"
+                    exit $?
+                    ;;
+                info)
+                    [[ -z "${1:-}" ]] && { echo "Usage: voidwave session info <session_id>"; exit 1; }
+                    session_info "$1"
+                    exit $?
+                    ;;
+                resume)
+                    [[ -z "${1:-}" ]] && { echo "Usage: voidwave session resume <session_id>"; exit 1; }
+                    session_resume "$1"
+                    exit $?
+                    ;;
+                delete)
+                    [[ -z "${1:-}" ]] && { echo "Usage: voidwave session delete <session_id>"; exit 1; }
+                    session_delete "$1"
+                    exit $?
+                    ;;
+                cleanup)
+                    session_cleanup "${1:-30}"
+                    exit $?
+                    ;;
+                *)
+                    log_error "Unknown session command: $subcmd"
+                    echo "Available: list, info, resume, delete, cleanup"
+                    exit 1
+                    ;;
+            esac
+            ;;
+        debug)
+            # Debug shell - loads all VOIDWAVE libraries for interactive testing
+            # Create a temp init file that sources all libraries
+            local debug_init
+            debug_init=$(mktemp)
+            cat > "$debug_init" << 'DEBUGEOF'
+# VOIDWAVE Debug Shell Init
+export PS1="\[\033[1;35m\]voidwave-debug\[\033[0m\]> "
+export VOIDWAVE_DEBUG_SHELL=1
+
+# Source all libraries (already loaded in parent, but we need them in new shell)
+DEBUGEOF
+            echo "source \"${VOIDWAVE_ROOT}/lib/core.sh\"" >> "$debug_init"
+            echo "source \"${VOIDWAVE_ROOT}/lib/ui.sh\"" >> "$debug_init"
+            echo "source \"${VOIDWAVE_ROOT}/lib/utils.sh\"" >> "$debug_init"
+            echo "source \"${VOIDWAVE_ROOT}/lib/config.sh\"" >> "$debug_init"
+            echo "source \"${VOIDWAVE_ROOT}/lib/detection.sh\"" >> "$debug_init"
+            echo "init_config" >> "$debug_init"
+            echo "load_config" >> "$debug_init"
+            cat >> "$debug_init" << 'DEBUGEOF2'
+
+echo -e "\033[1;35mVOIDWAVE Debug Shell\033[0m"
+echo "All libraries loaded. Available functions:"
+echo "  - log_info, log_warning, log_error, log_debug"
+echo "  - validate_ip, validate_cidr, validate_port"
+echo "  - config_get, config_set, config_show"
+echo "  - detect_system, check_tool, get_tool_path"
+echo "  - Type 'declare -F | grep -v ^_' to list all functions"
+echo "  - Type 'exit' to quit"
+echo ""
+DEBUGEOF2
+            # Start bash with our init file, then remove it
+            bash --rcfile "$debug_init" -i
+            rm -f "$debug_init"
+            exit 0
+            ;;
+        logs)
+            # Log viewing and filtering commands
+            local logs_subcmd="${1:-show}"
+            shift 2>/dev/null || true
+
+            # Ensure log directory exists
+            local log_dir="${VOIDWAVE_LOG_DIR:-$HOME/.voidwave/logs}"
+
+            case "$logs_subcmd" in
+                show|"")
+                    # Show recent logs from today's log file
+                    local lines="${1:-50}"
+                    local today_log="${log_dir}/voidwave_$(date +%Y%m%d).log"
+                    if [[ -f "$today_log" ]]; then
+                        echo -e "${C_CYAN}Recent logs (last $lines lines):${C_RESET}"
+                        tail -n "$lines" "$today_log"
+                    else
+                        log_warning "No log file for today at $today_log"
+                        # Try to find most recent log
+                        local latest
+                        latest=$(find "$log_dir" -name "voidwave_*.log" 2>/dev/null | sort -r | head -1)
+                        if [[ -n "$latest" ]]; then
+                            echo -e "${C_CYAN}Showing latest log: $latest${C_RESET}"
+                            tail -n "$lines" "$latest"
+                        fi
+                    fi
+                    ;;
+                search)
+                    # Search logs for pattern
+                    local pattern="${1:-}"
+                    if [[ -z "$pattern" ]]; then
+                        log_error "Usage: voidwave logs search <pattern>"
+                        exit 1
+                    fi
+                    shift
+                    local case_flag=""
+                    [[ "${1:-}" == "-i" ]] && case_flag="-i"
+
+                    echo -e "${C_CYAN}Searching logs for: $pattern${C_RESET}"
+                    if [[ -d "$log_dir" ]]; then
+                        grep $case_flag --color=auto -h "$pattern" "$log_dir"/voidwave_*.log 2>/dev/null | tail -100 || echo "No matches found"
+                    else
+                        log_error "Log directory not found: $log_dir"
+                        exit 1
+                    fi
+                    ;;
+                filter)
+                    # Filter logs by level
+                    local level=""
+                    local date_filter=""
+                    while [[ $# -gt 0 ]]; do
+                        case "$1" in
+                            --level|-l)
+                                level="$2"
+                                shift 2
+                                ;;
+                            --date|-d)
+                                date_filter="$2"
+                                shift 2
+                                ;;
+                            *)
+                                shift
+                                ;;
+                        esac
+                    done
+
+                    if [[ -z "$level" ]]; then
+                        log_error "Usage: voidwave logs filter --level <DEBUG|INFO|SUCCESS|WARNING|ERROR|FATAL>"
+                        exit 1
+                    fi
+
+                    # Normalize level to uppercase
+                    level="${level^^}"
+
+                    echo -e "${C_CYAN}Filtering logs by level: $level${C_RESET}"
+                    local log_file
+                    if [[ -n "$date_filter" ]]; then
+                        log_file="${log_dir}/voidwave_${date_filter}.log"
+                    else
+                        log_file="${log_dir}/voidwave_$(date +%Y%m%d).log"
+                    fi
+
+                    if [[ -f "$log_file" ]]; then
+                        grep --color=auto "\[$level\]" "$log_file" | tail -100 || echo "No $level entries found"
+                    else
+                        log_error "Log file not found: $log_file"
+                        exit 1
+                    fi
+                    ;;
+                tail)
+                    # Tail log with optional follow
+                    local follow=""
+                    local lines="20"
+                    while [[ $# -gt 0 ]]; do
+                        case "$1" in
+                            --follow|-f)
+                                follow="-f"
+                                shift
+                                ;;
+                            -n)
+                                lines="$2"
+                                shift 2
+                                ;;
+                            *)
+                                shift
+                                ;;
+                        esac
+                    done
+
+                    local today_log="${log_dir}/voidwave_$(date +%Y%m%d).log"
+                    if [[ ! -f "$today_log" ]]; then
+                        # Create empty log if it doesn't exist for follow mode
+                        touch "$today_log" 2>/dev/null
+                    fi
+
+                    echo -e "${C_CYAN}Tailing log: $today_log${C_RESET}"
+                    if [[ -n "$follow" ]]; then
+                        echo -e "${C_YELLOW}Press Ctrl+C to stop${C_RESET}"
+                    fi
+                    tail -n "$lines" $follow "$today_log"
+                    ;;
+                list)
+                    # List available log files
+                    echo -e "${C_CYAN}Available log files:${C_RESET}"
+                    if [[ -d "$log_dir" ]]; then
+                        ls -lht "$log_dir"/voidwave_*.log 2>/dev/null | head -20 || echo "No log files found"
+                    else
+                        log_error "Log directory not found: $log_dir"
+                    fi
+                    ;;
+                clear)
+                    # Clear old logs (keep last N days)
+                    local keep_days="${1:-7}"
+                    echo -e "${C_YELLOW}Clearing logs older than $keep_days days...${C_RESET}"
+                    if [[ -d "$log_dir" ]]; then
+                        find "$log_dir" -name "voidwave_*.log" -mtime +"$keep_days" -delete 2>/dev/null
+                        log_success "Old logs cleared"
+                    fi
+                    ;;
+                *)
+                    log_error "Unknown logs command: $logs_subcmd"
+                    echo "Available: show [lines], search <pattern>, filter --level <LEVEL>, tail [-f], list, clear [days]"
+                    exit 1
+                    ;;
+            esac
+            exit 0
+            ;;
+        memory)
+            # Session memory management
+            local mem_subcmd="${1:-show}"
+            shift 2>/dev/null || true
+
+            case "$mem_subcmd" in
+                show|"")
+                    # Show all memory contents
+                    if type -t memory_show &>/dev/null; then
+                        memory_show "${1:-all}"
+                    else
+                        log_error "Memory module not loaded"
+                        exit 1
+                    fi
+                    ;;
+                clear)
+                    # Clear memory (type or all)
+                    local mem_type="${1:-all}"
+                    if type -t memory_clear &>/dev/null; then
+                        if [[ "$mem_type" == "all" ]]; then
+                            confirm "Clear ALL session memory?" || exit 0
+                        fi
+                        memory_clear "$mem_type"
+                        log_success "Memory cleared: $mem_type"
+                    else
+                        log_error "Memory module not loaded"
+                        exit 1
+                    fi
+                    ;;
+                add)
+                    # Add to memory: voidwave memory add <type> <value> [metadata...]
+                    local mem_type="${1:-}"
+                    local mem_value="${2:-}"
+                    shift 2 2>/dev/null || true
+
+                    if [[ -z "$mem_type" || -z "$mem_value" ]]; then
+                        log_error "Usage: voidwave memory add <type> <value> [metadata...]"
+                        echo "Types: network, host, wireless, interface"
+                        exit 1
+                    fi
+
+                    if type -t memory_add &>/dev/null; then
+                        memory_add "$mem_type" "$mem_value" "$@"
+                        log_success "Added to memory: $mem_type = $mem_value"
+                    else
+                        log_error "Memory module not loaded"
+                        exit 1
+                    fi
+                    ;;
+                list)
+                    # List memory types or specific type
+                    local mem_type="${1:-all}"
+                    if type -t memory_get &>/dev/null; then
+                        echo ""
+                        echo -e "    ${C_CYAN:-}Session Memory: $mem_type${C_RESET:-}"
+                        echo ""
+                        case "$mem_type" in
+                            all)
+                                for t in network host wireless interface; do
+                                    local count
+                                    count=$(memory_count "$t" 2>/dev/null || echo "0")
+                                    echo -e "    ${C_WHITE:-}$t:${C_RESET:-} $count items"
+                                done
+                                ;;
+                            *)
+                                memory_get_values "$mem_type" | while read -r val; do
+                                    echo "    • $val"
+                                done
+                                ;;
+                        esac
+                        echo ""
+                    else
+                        log_error "Memory module not loaded"
+                        exit 1
+                    fi
+                    ;;
+                *)
+                    cat << 'MEMORY_HELP'
+VOIDWAVE Memory Commands — Session resource tracking
+
+Usage: voidwave memory <command> [options]
+
+Commands:
+  show [type]              Show memory contents (default: all)
+  list [type]              List memory entries (all, network, host, wireless, interface)
+  clear [type]             Clear memory (all, network, host, wireless, interface)
+  add <type> <value>       Add entry to memory
+
+Memory Types:
+  network     - Network targets (IP/CIDR)
+  host        - Host addresses
+  wireless    - Wireless APs (BSSID)
+  interface   - Network interfaces
+
+Examples:
+  voidwave memory show              Show all memory
+  voidwave memory list network      List saved networks
+  voidwave memory clear wireless    Clear wireless AP memory
+  voidwave memory add network 192.168.1.0/24
+MEMORY_HELP
+                    exit 0
+                    ;;
+            esac
+            exit 0
+            ;;
+        *)
+            log_error "Unknown command: $cmd"
+            echo "Run 'voidwave --help' for usage"
+            exit 1
+            ;;
+    esac
+}
+
+# Entry point (allows sourcing for tests without executing)
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

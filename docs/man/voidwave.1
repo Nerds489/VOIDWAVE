@@ -1,0 +1,283 @@
+.\" Man page for voidwave
+.\" Generated for VOIDWAVE v8.0.0
+.TH VOIDWAVE 1 "December 2025" "VOIDWAVE 8.0.0" "User Commands"
+.SH NAME
+voidwave \- Network security assessment toolkit
+.SH SYNOPSIS
+.B voidwave
+[\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR]
+.SH DESCRIPTION
+.B voidwave
+is a comprehensive network security assessment toolkit for penetration testing,
+wireless auditing, and security research. It provides a unified interface for
+scanning, WiFi operations, stress testing, and credential cracking.
+.PP
+VOIDWAVE integrates common security tools (nmap, aircrack-ng, hashcat, etc.)
+into a cohesive workflow with session management, guided wizards, and
+extensive logging.
+.SH OPTIONS
+.TP
+.BR \-n ", " \-\-dry\-run
+Show what would be executed without making changes. Useful for testing commands.
+.TP
+.BR \-j ", " \-\-json
+Output in JSON format where supported. Implies \fB\-\-quiet\fR.
+.TP
+.BR \-q ", " \-\-quiet
+Suppress non-essential output. Only show results and errors.
+.TP
+.BR \-v ", " \-\-verbose
+Enable verbose debug output. Sets log level to DEBUG.
+.TP
+.BR \-V ", " \-\-version
+Print version information and exit.
+.TP
+.BR \-h ", " \-\-help
+Show help message and exit.
+.TP
+.BR \-i ", " \-\-interactive
+Launch interactive menu mode for guided workflows.
+.TP
+.BR \-t ", " \-\-target " " \fIIP\fR
+Specify target IP address or CIDR range.
+.TP
+.BR \-o ", " \-\-output " " \fIDIR\fR
+Override output directory for results and logs.
+.SH COMMANDS
+.TP
+.B scan
+Network scanning using nmap, masscan, or other scanning tools.
+.TP
+.B wifi
+WiFi operations including monitor mode, deauthentication, and packet capture.
+.TP
+.B stress
+Stress testing with tools like hping3 and mdk4.
+.TP
+.B config
+Configuration management (show, get, set, edit, validate, reset).
+.TP
+.B session
+Session management for pausing and resuming operations.
+.TP
+.B status
+Show system information and tool availability status.
+.TP
+.B logs
+Log viewing, filtering, and search operations.
+.TP
+.B wizard
+Guided interactive workflows for common tasks.
+.TP
+.B debug
+Launch interactive debug shell with all libraries loaded.
+.TP
+.B help
+Show help message.
+.SH CONFIG SUBCOMMANDS
+.TP
+.B config show
+Display all configuration values.
+.TP
+.B config get \fIKEY\fR
+Get a specific configuration value.
+.TP
+.B config set \fIKEY\fR \fIVALUE\fR
+Set a configuration value.
+.TP
+.B config edit
+Open configuration file in editor.
+.TP
+.B config path
+Show path to configuration file.
+.TP
+.B config validate
+Validate all configuration values.
+.TP
+.B config reset
+Reset configuration to defaults.
+.SH WIFI SUBCOMMANDS
+.TP
+.B wifi list
+List available wireless interfaces.
+.TP
+.B wifi status \fIINTERFACE\fR
+Show interface mode (monitor/managed).
+.TP
+.B wifi monitor on \fIINTERFACE\fR
+Enable monitor mode on interface.
+.TP
+.B wifi monitor off \fIINTERFACE\fR
+Disable monitor mode on interface.
+.SH LOGS SUBCOMMANDS
+.TP
+.B logs
+Show recent log entries (alias for \fBlogs show\fR).
+.TP
+.B logs show \fR[\fIN\fR]
+Show last N lines of today's log (default: 50).
+.TP
+.B logs search \fIPATTERN\fR
+Search all log files for pattern.
+.TP
+.B logs filter \-\-level \fILEVEL\fR
+Filter logs by level (DEBUG, INFO, SUCCESS, WARNING, ERROR, FATAL).
+.TP
+.B logs filter \-\-date \fIYYYYMMDD\fR
+Filter logs from a specific date.
+.TP
+.B logs tail \fR[\fB\-f\fR]
+Tail the log file, optionally following new entries.
+.TP
+.B logs list
+List available log files.
+.TP
+.B logs clear \fR[\fIDAYS\fR]
+Delete log files older than N days (default: 7).
+.SH SESSION SUBCOMMANDS
+.TP
+.B session list
+List all saved sessions.
+.TP
+.B session list \-\-active
+List only active sessions.
+.TP
+.B session info \fIID\fR
+Show details about a specific session.
+.TP
+.B session resume \fIID\fR
+Resume a saved session.
+.TP
+.B session delete \fIID\fR
+Delete a session.
+.TP
+.B session cleanup \fR[\fIDAYS\fR]
+Remove sessions older than N days (default: 30).
+.SH WIZARD SUBCOMMANDS
+.TP
+.B wizard first
+First-time setup wizard.
+.TP
+.B wizard scan
+Guided network scanning workflow.
+.TP
+.B wizard wifi
+Guided WiFi assessment workflow (requires root).
+.SH ENVIRONMENT
+.TP
+.B VW_NON_INTERACTIVE
+Set to 1 to disable all interactive prompts. Useful for scripts and CI.
+.TP
+.B VW_SUPPRESS_OUTPUT
+Set to 1 to suppress non-essential output.
+.TP
+.B VW_DRY_RUN
+Set to 1 to enable dry-run mode globally.
+.TP
+.B VW_UNSAFE_MODE
+Set to 1 to bypass safety confirmations (use with caution).
+.TP
+.B DEBUG
+Set to 1 to enable debug output.
+.TP
+.B NO_COLOR
+Set to 1 to disable colored output.
+.TP
+.B VOIDWAVE_HOME
+Base directory for all VOIDWAVE data (default: ~/.voidwave).
+.TP
+.B VOIDWAVE_CONFIG_DIR
+Configuration directory (default: ~/.voidwave/config).
+.TP
+.B VOIDWAVE_LOG_DIR
+Log directory (default: ~/.voidwave/logs).
+.TP
+.B VOIDWAVE_LOG_LEVEL
+Minimum log level: 0=DEBUG, 1=INFO, 2=SUCCESS, 3=WARNING, 4=ERROR, 5=FATAL.
+.TP
+.B VOIDWAVE_LOG_FORMAT
+Log format: "text" (default) or "json" for structured logging.
+.TP
+.B VOIDWAVE_FILE_LOGGING
+Set to 0 to disable file logging.
+.SH FILES
+.TP
+.I ~/.voidwave/
+Base directory for user data.
+.TP
+.I ~/.voidwave/config/voidwave.conf
+User configuration file.
+.TP
+.I ~/.voidwave/logs/
+Log files directory.
+.TP
+.I ~/.voidwave/loot/
+Captured credentials and handshakes.
+.TP
+.I ~/.voidwave/sessions/
+Saved session files.
+.SH EXAMPLES
+Basic network scan:
+.PP
+.RS 4
+voidwave scan \-t 192.168.1.0/24
+.RE
+.PP
+Dry-run to preview WiFi monitor mode:
+.PP
+.RS 4
+voidwave \-\-dry\-run wifi monitor on wlan0
+.RE
+.PP
+Get status in JSON format:
+.PP
+.RS 4
+voidwave \-\-json status
+.RE
+.PP
+Filter logs by error level:
+.PP
+.RS 4
+voidwave logs filter \-\-level ERROR
+.RE
+.PP
+Follow logs in real-time:
+.PP
+.RS 4
+voidwave logs tail \-f
+.RE
+.PP
+Run in non-interactive mode:
+.PP
+.RS 4
+VW_NON_INTERACTIVE=1 voidwave config show
+.RE
+.PP
+JSON logging for parsing:
+.PP
+.RS 4
+VOIDWAVE_LOG_FORMAT=json voidwave status 2>&1 | jq .
+.RE
+.SH EXIT STATUS
+.TP
+.B 0
+Successful completion.
+.TP
+.B 1
+General error or invalid arguments.
+.TP
+.B 2
+Missing required tools or dependencies.
+.SH SEE ALSO
+.BR nmap (1),
+.BR aircrack-ng (1),
+.BR hashcat (1),
+.BR hping3 (8),
+.BR tcpdump (1)
+.SH BUGS
+Report bugs via project issue tracker.
+.SH AUTHOR
+Written by the VOIDWAVE team.
+.SH COPYRIGHT
+Copyright (C) 2024-2025 VOIDWAVE Project.
+Licensed under the MIT License.

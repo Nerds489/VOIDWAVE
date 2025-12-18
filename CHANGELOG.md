@@ -2,6 +2,40 @@
 
 All notable changes to VOIDWAVE.
 
+## [10.0.0] - 2025-12-18
+
+### Major Release: VOIDWAVE Evolution
+
+This release marks the evolution from NETREAPER (v1-9) to VOIDWAVE (v10+). Complete framework overhaul with unified architecture.
+
+### Added
+- **New README** - Professional, modern design with ASCII banner and clean structure
+- **Universal Installer** (`bin/voidwave-install`) - Truly distro-agnostic with support for:
+  - Debian/Ubuntu/Kali/Parrot (apt)
+  - Fedora/RHEL/Rocky/Alma (dnf/yum)
+  - Arch/Manjaro/BlackArch/EndeavourOS (pacman + AUR)
+  - openSUSE (zypper)
+  - Alpine (apk)
+  - Void Linux (xbps)
+  - Gentoo (emerge)
+  - NixOS (nix-env)
+- **Fallback Installation Chain** - pkg manager → pip → go install → cargo → GitHub releases → snap/flatpak
+- **Package Name Mapping** - Handles distro-specific package name differences
+- **Tool Verification** - Post-install validation with --version/--help checks
+- **Installation Summary** - Clean [OK]/[FAIL]/[SKIP] output with detailed logging
+
+### Changed
+- Rebranded from NETREAPER to VOIDWAVE
+- Version jump from 8.x to 10.0.0 to mark the evolution
+- All documentation updated to reflect 10.0.0
+- Installer now generates manual installation guide for failed tools
+
+### Heritage
+- NETREAPER v1-9: Original development
+- VOIDWAVE v10+: Rebuilt architecture, expanded toolset, unified interface
+
+---
+
 ## [8.2.0] - 2025-12-15
 
 ### Added

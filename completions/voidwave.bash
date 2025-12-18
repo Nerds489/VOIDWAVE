@@ -1,5 +1,5 @@
 # VOIDWAVE bash completion
-# Version: 6.3.4
+# Version: 10.0.0
 
 _voidwave() {
     local cur prev words cword

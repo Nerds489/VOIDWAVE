@@ -13,7 +13,7 @@
 ## Overview
 VOIDWAVE is a unified offensive toolkit with 70+ tools behind one interface. Use it to scan, attack, monitor, and report without juggling individual commands.
 
-**What's new in v6.2.2 (Phantom Protocol):** executables now live in `bin/` with repo-level wrappers, the first-run wizard honors non-interactive mode, docs live entirely under `docs/`, and Apache 2.0 is the only license (no separate EULA).
+**What's new in v10.0.0 (VOIDWAVE):** Complete framework overhaul evolved from NETREAPER. Unified architecture, expanded toolset, distro-agnostic installer, session memory system, and 70+ integrated security tools.
 
 ## Logging & Verbosity
 - Levels: DEBUG, INFO, WARN, ERROR, FATAL (set via `VOIDWAVE_LOG_LEVEL` or config).

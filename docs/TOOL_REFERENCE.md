@@ -1,4 +1,4 @@
-# VOIDWAVE Tool Reference (v6.3.4)
+# VOIDWAVE Tool Reference (v10.0.0)
 
 VOIDWAVE wraps 70+ tools behind one interface. Run it via `./voidwave` inside the repo (wrapper) or `voidwave` after installing system-wide; both call the executable under `bin/`. Use the interactive menu for guided flows. CLI shortcuts available:
 - `voidwave scan <target> (--quick|--full|--vuln|--stealth)`

@@ -37,20 +37,54 @@ log_ok()      { echo -e "${C_GREEN}[OK]${C_RESET}   $*"; }
 log_warn()    { echo -e "${C_YELLOW}[WARN]${C_RESET} $*"; }
 log_error()   { echo -e "${C_RED}[ERROR]${C_RESET} $*" >&2; }
 
+# Detect the host distribution
+detect_host_distro() {
+    if [[ -f /etc/os-release ]]; then
+        source /etc/os-release
+        echo "${ID:-unknown}"
+    else
+        echo "unknown"
+    fi
+}
+
 # Check if distrobox is available
 check_distrobox() {
     if ! command -v distrobox &>/dev/null; then
         log_error "Distrobox is not installed"
         echo
-        echo "Install distrobox using one of these methods:"
+        local distro
+        distro=$(detect_host_distro)
+
+        echo "Install distrobox for your system:"
         echo
-        echo "  ${C_CYAN}# Using the official installer (recommended):${C_RESET}"
-        echo "  curl -s https://raw.githubusercontent.com/89luca89/distrobox/main/install | sh -s -- --prefix ~/.local"
+        case "$distro" in
+            bazzite|fedora|silverblue|kinoite)
+                echo "  ${C_CYAN}# For Bazzite/Fedora Atomic (ujust method):${C_RESET}"
+                echo "  ujust install-distrobox"
+                echo
+                echo "  ${C_CYAN}# Or via rpm-ostree:${C_RESET}"
+                echo "  rpm-ostree install distrobox && systemctl reboot"
+                ;;
+            steamos)
+                echo "  ${C_CYAN}# On Steam Deck, distrobox should be pre-installed.${C_RESET}"
+                echo "  ${C_CYAN}# If not, try the official installer:${C_RESET}"
+                echo "  curl -s https://raw.githubusercontent.com/89luca89/distrobox/main/install | sh -s -- --prefix ~/.local"
+                ;;
+            arch|manjaro|endeavouros)
+                echo "  ${C_CYAN}# Arch-based:${C_RESET}"
+                echo "  sudo pacman -S distrobox podman"
+                ;;
+            ubuntu|debian|pop|linuxmint)
+                echo "  ${C_CYAN}# Debian/Ubuntu-based:${C_RESET}"
+                echo "  sudo apt install distrobox podman"
+                ;;
+            *)
+                echo "  ${C_CYAN}# Universal installer (works everywhere):${C_RESET}"
+                echo "  curl -s https://raw.githubusercontent.com/89luca89/distrobox/main/install | sh -s -- --prefix ~/.local"
+                ;;
+        esac
         echo
-        echo "  ${C_CYAN}# Or via your package manager:${C_RESET}"
-        echo "  # Fedora/rpm-ostree: rpm-ostree install distrobox"
-        echo "  # Arch: pacman -S distrobox"
-        echo "  # Ubuntu/Debian: apt install distrobox"
+        echo "After installing, make sure ~/.local/bin is in your PATH"
         echo
         exit 1
     fi
@@ -254,6 +288,95 @@ cmd_status() {
     echo
 }
 
+# Diagnose environment and report issues
+cmd_doctor() {
+    show_banner
+    echo -e "${C_BOLD}VOIDWAVE Distrobox Environment Check${C_RESET}"
+    echo
+    local issues=0
+    local distro
+    distro=$(detect_host_distro)
+
+    echo -e "${C_BOLD}System:${C_RESET}"
+    echo -e "  Distribution: ${C_CYAN}$distro${C_RESET}"
+
+    # Check if immutable
+    local immutable="No"
+    if [[ -d /ostree ]] || command -v rpm-ostree &>/dev/null; then
+        immutable="Yes (ostree-based)"
+    elif [[ "$distro" == "steamos" || "$distro" == "bazzite" ]]; then
+        immutable="Yes"
+    fi
+    echo -e "  Immutable system: ${C_CYAN}$immutable${C_RESET}"
+    echo
+
+    echo -e "${C_BOLD}Dependencies:${C_RESET}"
+
+    # Check distrobox
+    if command -v distrobox &>/dev/null; then
+        local dbver
+        dbver=$(distrobox version 2>/dev/null | head -1 || echo "unknown")
+        echo -e "  ${C_GREEN}[OK]${C_RESET} distrobox: $dbver"
+    else
+        echo -e "  ${C_RED}[MISSING]${C_RESET} distrobox"
+        issues=$((issues + 1))
+    fi
+
+    # Check container runtime
+    if command -v podman &>/dev/null; then
+        local podver
+        podver=$(podman --version 2>/dev/null | head -1 || echo "unknown")
+        echo -e "  ${C_GREEN}[OK]${C_RESET} podman: $podver"
+    elif command -v docker &>/dev/null; then
+        local dockver
+        dockver=$(docker --version 2>/dev/null | head -1 || echo "unknown")
+        echo -e "  ${C_GREEN}[OK]${C_RESET} docker: $dockver"
+    else
+        echo -e "  ${C_RED}[MISSING]${C_RESET} container runtime (podman or docker)"
+        issues=$((issues + 1))
+    fi
+
+    echo
+
+    echo -e "${C_BOLD}Container Status:${C_RESET}"
+    if command -v distrobox &>/dev/null; then
+        if container_exists; then
+            echo -e "  ${C_GREEN}[OK]${C_RESET} Container '$CONTAINER_NAME' exists"
+
+            # Check if running
+            if podman ps 2>/dev/null | grep -q "$CONTAINER_NAME" || \
+               docker ps 2>/dev/null | grep -q "$CONTAINER_NAME"; then
+                echo -e "  ${C_GREEN}[OK]${C_RESET} Container is running"
+            else
+                echo -e "  ${C_YELLOW}[INFO]${C_RESET} Container is stopped (will start on enter)"
+            fi
+        else
+            echo -e "  ${C_YELLOW}[INFO]${C_RESET} Container '$CONTAINER_NAME' not created yet"
+            echo -e "        Run: ${C_CYAN}voidwave-distrobox create${C_RESET}"
+        fi
+    else
+        echo -e "  ${C_YELLOW}[SKIP]${C_RESET} Cannot check (distrobox not installed)"
+    fi
+
+    echo
+
+    # Summary
+    if [[ $issues -eq 0 ]]; then
+        echo -e "${C_GREEN}All checks passed!${C_RESET}"
+        echo
+        if ! container_exists 2>/dev/null; then
+            echo "Ready to create your container:"
+            echo "  ${C_CYAN}voidwave-distrobox create${C_RESET}"
+        fi
+    else
+        echo -e "${C_RED}Found $issues issue(s) that need attention.${C_RESET}"
+        echo
+        echo "Fix the issues above, then run this check again:"
+        echo "  ${C_CYAN}voidwave-distrobox doctor${C_RESET}"
+    fi
+    echo
+}
+
 # Export a command from the container to the host
 cmd_export() {
     local app="${1:-}"
@@ -302,6 +425,7 @@ ${C_BOLD}COMMANDS:${C_RESET}
     remove            Remove the container
     status            Show container status
     export <app>      Export an app from container to host
+    doctor            Check environment and diagnose issues
     help              Show this help
 
 ${C_BOLD}ENVIRONMENT VARIABLES:${C_RESET}
@@ -364,6 +488,9 @@ main() {
             ;;
         export)
             cmd_export "${2:-}"
+            ;;
+        doctor|check|diagnose)
+            cmd_doctor
             ;;
         help|--help|-h)
             show_help

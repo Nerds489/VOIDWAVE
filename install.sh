@@ -18,66 +18,159 @@ set -euo pipefail
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 #═══════════════════════════════════════════════════════════════════════════════
-# IMMUTABLE/SPECIAL SYSTEM DETECTION
+# SYSTEM DETECTION
 #═══════════════════════════════════════════════════════════════════════════════
 
+# System info (populated by _detect_system)
+DISTRO_ID=""
+DISTRO_NAME=""
+DISTRO_FAMILY=""       # debian, redhat, arch, suse, alpine, nixos, unknown
+PKG_MANAGER=""         # apt, dnf, yum, pacman, zypper, apk, nix, unknown
+ARCH=""                # x86_64, aarch64, armv7l, etc.
 IS_IMMUTABLE=0
 IS_STEAMDECK=0
 IS_WSL=0
+IS_CONTAINER=0
+IS_ROOT=0
 
-# Detect immutable systems (SteamOS, Silverblue, Bazzite, etc.)
-_detect_immutable() {
-    # Check for SteamOS/Bazzite/ChimeraOS
+# Full system detection
+_detect_system() {
+    # Architecture
+    ARCH=$(uname -m)
+
+    # Root check
+    [[ $EUID -eq 0 ]] && IS_ROOT=1
+
+    # Parse os-release
     if [[ -f /etc/os-release ]]; then
-        local os_id
-        os_id=$(sed -n 's/^ID=//p' /etc/os-release | tr -d '"')
-        case "$os_id" in
-            steamos|bazzite|chimeraos|vanilla|blendos)
-                IS_IMMUTABLE=1
-                [[ "$os_id" == "steamos" || "$os_id" == "bazzite" ]] && IS_STEAMDECK=1
-                return 0
-                ;;
-        esac
+        DISTRO_ID=$(sed -n 's/^ID=//p' /etc/os-release | tr -d '"' | head -1)
+        DISTRO_NAME=$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release | tr -d '"' | head -1)
     fi
 
-    # Check for rpm-ostree (Silverblue, Kinoite, etc.)
-    if command -v rpm-ostree &>/dev/null; then
-        IS_IMMUTABLE=1
-        return 0
+    # Detect distro family and package manager
+    case "$DISTRO_ID" in
+        ubuntu|debian|pop|linuxmint|elementary|zorin|kali|parrot|raspbian)
+            DISTRO_FAMILY="debian"
+            PKG_MANAGER="apt"
+            ;;
+        fedora|rhel|centos|rocky|alma|oracle|amazon)
+            DISTRO_FAMILY="redhat"
+            PKG_MANAGER="dnf"
+            command -v dnf &>/dev/null || PKG_MANAGER="yum"
+            ;;
+        arch|manjaro|endeavouros|garuda|artix|cachyos)
+            DISTRO_FAMILY="arch"
+            PKG_MANAGER="pacman"
+            ;;
+        opensuse*|suse|sles)
+            DISTRO_FAMILY="suse"
+            PKG_MANAGER="zypper"
+            ;;
+        alpine)
+            DISTRO_FAMILY="alpine"
+            PKG_MANAGER="apk"
+            ;;
+        nixos)
+            DISTRO_FAMILY="nixos"
+            PKG_MANAGER="nix"
+            ;;
+        void)
+            DISTRO_FAMILY="void"
+            PKG_MANAGER="xbps"
+            ;;
+        gentoo)
+            DISTRO_FAMILY="gentoo"
+            PKG_MANAGER="emerge"
+            ;;
+        steamos|chimeraos)
+            DISTRO_FAMILY="arch"  # SteamOS/ChimeraOS are Arch-based
+            PKG_MANAGER="pacman"
+            IS_STEAMDECK=1
+            IS_IMMUTABLE=1
+            ;;
+        bazzite)
+            DISTRO_FAMILY="redhat"  # Bazzite is Fedora Atomic-based
+            PKG_MANAGER="rpm-ostree"
+            IS_STEAMDECK=1
+            IS_IMMUTABLE=1
+            ;;
+        silverblue|kinoite)
+            DISTRO_FAMILY="redhat"
+            PKG_MANAGER="rpm-ostree"
+            IS_IMMUTABLE=1
+            ;;
+        vanilla|blendos)
+            IS_IMMUTABLE=1
+            ;;
+        *)
+            DISTRO_FAMILY="unknown"
+            # Try to detect package manager
+            if command -v apt-get &>/dev/null; then
+                PKG_MANAGER="apt"
+                DISTRO_FAMILY="debian"
+            elif command -v dnf &>/dev/null; then
+                PKG_MANAGER="dnf"
+                DISTRO_FAMILY="redhat"
+            elif command -v pacman &>/dev/null; then
+                PKG_MANAGER="pacman"
+                DISTRO_FAMILY="arch"
+            elif command -v zypper &>/dev/null; then
+                PKG_MANAGER="zypper"
+                DISTRO_FAMILY="suse"
+            elif command -v apk &>/dev/null; then
+                PKG_MANAGER="apk"
+                DISTRO_FAMILY="alpine"
+            else
+                PKG_MANAGER="unknown"
+            fi
+            ;;
+    esac
+
+    # Detect immutable systems (if not already set)
+    if [[ $IS_IMMUTABLE -eq 0 ]]; then
+        # rpm-ostree based (Silverblue, Kinoite, Bazzite, etc.)
+        if command -v rpm-ostree &>/dev/null; then
+            IS_IMMUTABLE=1
+            PKG_MANAGER="rpm-ostree"
+        # ostree
+        elif [[ -d /ostree ]] || [[ -d /sysroot/ostree ]]; then
+            IS_IMMUTABLE=1
+        # NixOS
+        elif [[ -f /etc/NIXOS ]] || [[ -d /nix/store ]]; then
+            IS_IMMUTABLE=1
+        # Read-only root
+        elif grep -q " / .*\bro\b" /proc/mounts 2>/dev/null; then
+            IS_IMMUTABLE=1
+        fi
     fi
 
-    # Check for ostree
-    if [[ -d /ostree ]] || [[ -d /sysroot/ostree ]]; then
-        IS_IMMUTABLE=1
-        return 0
-    fi
-
-    # Check for NixOS
-    if [[ -f /etc/NIXOS ]] || [[ -d /nix/store ]]; then
-        IS_IMMUTABLE=1
-        return 0
-    fi
-
-    # Check for read-only root
-    if grep -q " / .*\bro\b" /proc/mounts 2>/dev/null; then
-        IS_IMMUTABLE=1
-        return 0
-    fi
-
-    return 1
-}
-
-# Detect WSL
-_detect_wsl() {
+    # Detect WSL
     if [[ -f /proc/version ]] && grep -qiE "(microsoft|wsl)" /proc/version 2>/dev/null; then
         IS_WSL=1
-        return 0
-    fi
-    if [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
+    elif [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
         IS_WSL=1
-        return 0
     fi
-    return 1
+
+    # Detect if running inside a container
+    if [[ -f /.dockerenv ]] || [[ -f /run/.containerenv ]]; then
+        IS_CONTAINER=1
+    elif grep -q "docker\|lxc\|podman" /proc/1/cgroup 2>/dev/null; then
+        IS_CONTAINER=1
+    fi
+}
+
+# Show detected system info (for debugging)
+_show_system_info() {
+    echo "System Information:" >&2
+    echo "  Distro:      ${DISTRO_NAME:-$DISTRO_ID}" >&2
+    echo "  Family:      $DISTRO_FAMILY" >&2
+    echo "  Package Mgr: $PKG_MANAGER" >&2
+    echo "  Arch:        $ARCH" >&2
+    echo "  Immutable:   $([[ $IS_IMMUTABLE -eq 1 ]] && echo "Yes" || echo "No")" >&2
+    echo "  Steam Deck:  $([[ $IS_STEAMDECK -eq 1 ]] && echo "Yes" || echo "No")" >&2
+    echo "  WSL:         $([[ $IS_WSL -eq 1 ]] && echo "Yes" || echo "No")" >&2
+    echo "  Container:   $([[ $IS_CONTAINER -eq 1 ]] && echo "Yes" || echo "No")" >&2
+    echo "  Root:        $([[ $IS_ROOT -eq 1 ]] && echo "Yes" || echo "No")" >&2
 }
 
 #═══════════════════════════════════════════════════════════════════════════════
@@ -87,6 +180,7 @@ _detect_wsl() {
 OPT_FORCE=0
 OPT_USER=0
 OPT_UNINSTALL=0
+OPT_INFO=0
 TOOL_INSTALL_ARGS=()
 
 _show_help() {
@@ -94,27 +188,40 @@ _show_help() {
 VOIDWAVE Installer
 
 Usage:
-  sudo ./install.sh [OPTIONS] [-- TOOL_INSTALLER_ARGS...]
+  ./install.sh [OPTIONS] [-- TOOL_INSTALLER_ARGS...]
 
 Options:
   --force       Overwrite existing installation
   --user        Install to user directory (~/.local/share/voidwave)
   --uninstall   Remove existing installation
+  --info        Show detected system info and exit
   --help        Show this help message
 
-System Install (requires root):
-  Installs to: /usr/local/share/voidwave (preferred) or /opt/voidwave
-  Symlinks to: /usr/local/bin or /usr/bin
+IMMUTABLE SYSTEMS (SteamOS, Bazzite, Silverblue, etc.):
+  These systems auto-detect and install to user directory.
+  NO SUDO NEEDED - just run: ./install.sh
 
-User Install (no root required):
-  Installs to: ~/.local/share/voidwave
-  Symlinks to: ~/.local/bin
+  After install, use distrobox for full pentesting:
+    voidwave-distrobox create   # Create Kali container
+    voidwave-distrobox setup    # Install tools
+    voidwave-distrobox enter    # Enter container
+
+TRADITIONAL SYSTEMS:
+  System Install (requires root):
+    sudo ./install.sh
+    Installs to: /usr/local/share/voidwave
+    Symlinks to: /usr/local/bin
+
+  User Install (no root required):
+    ./install.sh --user
+    Installs to: ~/.local/share/voidwave
+    Symlinks to: ~/.local/bin
 
 Examples:
-  sudo ./install.sh                    # Standard system install
-  sudo ./install.sh --force            # Overwrite existing install
-  ./install.sh --user                  # User-local install
-  sudo ./install.sh -- --all           # Install + run tool installer with --all
+  ./install.sh                         # Auto-detect best method
+  ./install.sh --force                 # Overwrite existing install
+  sudo ./install.sh                    # Force system install
+  ./install.sh -- --all                # Install + run tool installer
 HELPTEXT
 }
 
@@ -130,6 +237,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --uninstall)
             OPT_UNINSTALL=1
+            shift
+            ;;
+        --info|--sysinfo)
+            OPT_INFO=1
             shift
             ;;
         --help|-h)
@@ -194,33 +305,117 @@ _dir_in_path() {
 }
 
 #═══════════════════════════════════════════════════════════════════════════════
+# PRE-FLIGHT CHECKS
+#═══════════════════════════════════════════════════════════════════════════════
+
+_preflight_checks() {
+    local errors=0
+
+    # Check bash version (need 4.0+ for associative arrays)
+    if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+        _error "Bash 4.0 or later required (found ${BASH_VERSION})"
+        errors=$((errors + 1))
+    fi
+
+    # Validate source directory structure
+    if [[ ! -f "$SOURCE_DIR/bin/voidwave" ]]; then
+        _error "Invalid source: bin/voidwave not found in $SOURCE_DIR"
+        _error "Are you running install.sh from the VOIDWAVE directory?"
+        errors=$((errors + 1))
+    fi
+
+    if [[ ! -f "$SOURCE_DIR/VERSION" ]]; then
+        _error "Invalid source: VERSION file not found in $SOURCE_DIR"
+        errors=$((errors + 1))
+    fi
+
+    if [[ ! -d "$SOURCE_DIR/lib" ]]; then
+        _error "Invalid source: lib/ directory not found in $SOURCE_DIR"
+        errors=$((errors + 1))
+    fi
+
+    # Check for common issues with running the script
+    if [[ ! -x "$SOURCE_DIR/bin/voidwave" ]]; then
+        _warn "bin/voidwave is not executable, fixing..."
+        chmod +x "$SOURCE_DIR/bin/voidwave" 2>/dev/null || {
+            _error "Cannot make bin/voidwave executable"
+            errors=$((errors + 1))
+        }
+    fi
+
+    # Check for restrictive file permissions that will cause issues
+    for script in "$SOURCE_DIR/bin/"*; do
+        if [[ -f "$script" ]] && [[ ! -r "$script" ]]; then
+            _warn "Fixing restrictive permissions on $(basename "$script")"
+            chmod a+r "$script" 2>/dev/null || true
+        fi
+    done
+
+    if [[ $errors -gt 0 ]]; then
+        _error "Pre-flight checks failed with $errors error(s)"
+        exit 1
+    fi
+
+    return 0
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
 # INSTALL LOCATION SELECTION
 #═══════════════════════════════════════════════════════════════════════════════
 
 # Select the install root directory
 # Sets: INSTALL_ROOT, BIN_DIR
 _select_install_locations() {
-    # Detect special systems first
-    _detect_immutable || true
-    _detect_wsl || true
+    # Run full system detection
+    _detect_system
+
+    # Warn if running inside a container
+    if [[ $IS_CONTAINER -eq 1 ]]; then
+        _warn "Running inside a container (docker/podman/distrobox)"
+        _warn "You probably want to install on the host system instead"
+        echo "" >&2
+    fi
 
     # Force user install on immutable systems
     if [[ $IS_IMMUTABLE -eq 1 ]] && [[ $OPT_USER -eq 0 ]]; then
-        _warn "Immutable system detected (SteamOS/Silverblue/Bazzite/etc.)"
-        _warn "Forcing user-mode installation to ~/.local/share/voidwave"
-        echo
-        echo "[i] For full functionality on immutable systems, consider using:"
-        echo "    voidwave-distrobox create   # Create a Kali container"
-        echo "    voidwave-distrobox setup    # Install pentesting tools"
-        echo "    voidwave-distrobox enter    # Enter the container"
-        echo
+        echo "" >&2
+        echo "┌─────────────────────────────────────────────────────────────────┐" >&2
+        echo "│  IMMUTABLE SYSTEM DETECTED                                      │" >&2
+        printf "│  %-63s│\n" "${DISTRO_NAME:-$DISTRO_ID}" >&2
+        echo "└─────────────────────────────────────────────────────────────────┘" >&2
+        echo "" >&2
+
+        # Warn if running with sudo unnecessarily
+        if [[ $IS_ROOT -eq 1 ]] && [[ -n "${SUDO_USER:-}" ]]; then
+            _warn "You ran with sudo, but it's not needed on immutable systems!"
+            _warn "Next time just run: ./install.sh"
+            echo "" >&2
+        fi
+
+        _log "Installing to user directory: ~/.local/share/voidwave"
+        echo "" >&2
+        echo "[i] On immutable systems, use distrobox for full pentesting:" >&2
+        echo "    voidwave-distrobox create   # Create a Kali container" >&2
+        echo "    voidwave-distrobox setup    # Install pentesting tools" >&2
+        echo "    voidwave-distrobox enter    # Enter the container" >&2
+        echo "" >&2
         OPT_USER=1
     fi
 
+    # Determine the actual user home directory
+    # When running with sudo, $HOME is /root, but we want the real user's home
+    local USER_HOME="${HOME}"
+    if [[ $EUID -eq 0 ]] && [[ -n "${SUDO_USER:-}" ]]; then
+        USER_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+        if [[ -z "$USER_HOME" ]]; then
+            USER_HOME="/home/$SUDO_USER"
+        fi
+    fi
+
     if [[ $OPT_USER -eq 1 ]] || ! _is_root; then
-        # User install
-        INSTALL_ROOT="${HOME}/.local/share/voidwave"
-        BIN_DIR="${HOME}/.local/bin"
+        # User install - use the real user's home, not root's
+        INSTALL_ROOT="${USER_HOME}/.local/share/voidwave"
+        BIN_DIR="${USER_HOME}/.local/bin"
         _log "User install mode selected"
 
         # Special handling for Steam Deck
@@ -419,19 +614,7 @@ _do_install() {
         fi
     fi
 
-    # Validate source directory has required files
-    if [[ ! -f "$SOURCE_DIR/bin/voidwave" ]]; then
-        _error "Source validation failed: bin/voidwave not found in $SOURCE_DIR"
-        exit 1
-    fi
-    if [[ ! -f "$SOURCE_DIR/VERSION" ]]; then
-        _error "Source validation failed: VERSION file not found in $SOURCE_DIR"
-        exit 1
-    fi
-    if [[ ! -d "$SOURCE_DIR/lib" ]]; then
-        _error "Source validation failed: lib/ directory not found in $SOURCE_DIR"
-        exit 1
-    fi
+    # Source validation already done in _preflight_checks
 
     # Create install root
     _log "Creating install directory: $INSTALL_ROOT"
@@ -454,9 +637,18 @@ _do_install() {
         cp -r "$SOURCE_DIR/completions" "$INSTALL_ROOT/"
     fi
 
-    # Ensure bin scripts are executable
+    # Ensure bin scripts are executable and readable
     chmod +x "$INSTALL_ROOT/bin/voidwave"
     chmod +x "$INSTALL_ROOT/bin/voidwave-install" 2>/dev/null || true
+    chmod +x "$INSTALL_ROOT/bin/voidwave-distrobox" 2>/dev/null || true
+    # Ensure scripts are readable (some may have restrictive perms in repo)
+    chmod a+r "$INSTALL_ROOT/bin/"* 2>/dev/null || true
+
+    # If running with sudo, fix ownership to the actual user
+    if [[ $EUID -eq 0 ]] && [[ -n "${SUDO_USER:-}" ]] && [[ $OPT_USER -eq 1 ]]; then
+        _log "Fixing ownership for user: $SUDO_USER"
+        chown -R "$SUDO_USER:$SUDO_USER" "$INSTALL_ROOT"
+    fi
 
     _log "Project files copied successfully"
 
@@ -478,6 +670,11 @@ _do_install() {
     if [[ -f "$INSTALL_ROOT/bin/voidwave-distrobox" ]]; then
         _log "Creating symlink: $BIN_DIR/voidwave-distrobox -> $INSTALL_ROOT/bin/voidwave-distrobox"
         ln -sf "$INSTALL_ROOT/bin/voidwave-distrobox" "$BIN_DIR/voidwave-distrobox"
+    fi
+
+    # If running with sudo for user install, fix ownership of bin dir and symlinks
+    if [[ $EUID -eq 0 ]] && [[ -n "${SUDO_USER:-}" ]] && [[ $OPT_USER -eq 1 ]]; then
+        chown -h "$SUDO_USER:$SUDO_USER" "$BIN_DIR/voidwave" "$BIN_DIR/voidwave-install" "$BIN_DIR/voidwave-distrobox" 2>/dev/null || true
     fi
 
     # Handle PATH configuration
@@ -601,21 +798,28 @@ _verify_installation() {
     fi
 
     # 2. Check wrapper exists and is in expected location
-    if [[ "$wrapper_path" != "$BIN_DIR/voidwave" ]]; then
+    # Canonicalize paths for comparison on ostree systems where paths may differ
+    local canonical_wrapper canonical_expected_bin
+    canonical_wrapper=$(readlink -f "$wrapper_path" 2>/dev/null || echo "$wrapper_path")
+    canonical_expected_bin=$(readlink -f "$BIN_DIR/voidwave" 2>/dev/null || echo "$BIN_DIR/voidwave")
+    if [[ "$canonical_wrapper" != "$canonical_expected_bin" ]]; then
         _error "VERIFY FAILED: Wrapper not in expected location"
-        _error "Expected: $BIN_DIR/voidwave"
-        _error "Got: $wrapper_path"
+        _error "Expected: $BIN_DIR/voidwave (canonical: $canonical_expected_bin)"
+        _error "Got: $wrapper_path (canonical: $canonical_wrapper)"
         errors=$((errors + 1))
     fi
 
     # 3. Check symlink or small wrapper (not a monolith)
     if [[ -L "$wrapper_path" ]]; then
         # It's a symlink - verify it points to the right place
-        local link_target
+        # On ostree systems (Bazzite/Silverblue), paths can have symlink indirection
+        # e.g., /home/user -> /var/home/user, so we canonicalize both paths
+        local link_target expected_target
         link_target=$(readlink -f "$wrapper_path" 2>/dev/null || readlink "$wrapper_path" 2>/dev/null)
-        if [[ "$link_target" != "$INSTALL_ROOT/bin/voidwave" ]]; then
+        expected_target=$(readlink -f "$INSTALL_ROOT/bin/voidwave" 2>/dev/null || echo "$INSTALL_ROOT/bin/voidwave")
+        if [[ "$link_target" != "$expected_target" ]]; then
             _error "VERIFY FAILED: Symlink points to wrong location"
-            _error "Expected: $INSTALL_ROOT/bin/voidwave"
+            _error "Expected: $expected_target"
             _error "Got: $link_target"
             errors=$((errors + 1))
         else
@@ -709,12 +913,23 @@ main() {
     echo " VOIDWAVE Installer" >&2
     echo "═══════════════════════════════════════════════════════════════════" >&2
 
+    # Handle --info flag (show system info and exit)
+    if [[ $OPT_INFO -eq 1 ]]; then
+        _detect_system
+        echo "" >&2
+        _show_system_info
+        exit 0
+    fi
+
+    # Run pre-flight checks first
+    _preflight_checks
+
     # Handle uninstall
     if [[ $OPT_UNINSTALL -eq 1 ]]; then
         _do_uninstall
     fi
 
-    # Select install locations
+    # Select install locations (also detects immutable systems)
     _select_install_locations
 
     # Cleanup legacy installs

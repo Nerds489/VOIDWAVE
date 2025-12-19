@@ -66,7 +66,9 @@ show_stress_menu() {
         echo ""
 
         local choice
-        read -rp "    Select [0-6]: " choice
+        echo -en "    ${C_PURPLE:-}▶${C_RESET:-} Select [0-6]: "
+        read -r choice
+        choice="${choice//[[:space:]]/}"
 
         case "$choice" in
             1) _stress_http ;;
@@ -76,7 +78,8 @@ show_stress_menu() {
             5) _stress_conn ;;
             6) _stress_bandwidth ;;
             0) return 0 ;;
-            *) echo -e "    ${C_RED:-}Invalid option${C_RESET:-}"; sleep 1 ;;
+            "") continue ;;
+            *) echo -e "    ${C_RED:-}[!] Invalid option: '$choice'${C_RESET:-}"; sleep 1 ;;
         esac
     done
 }

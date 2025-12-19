@@ -271,50 +271,57 @@ _memory_show_selection() {
         displays+=("$value ${C_SHADOW:-}($age)${C_RESET:-}")
     done < <(memory_get "$type" 10)
 
-    # NOTE: All prompts go to stderr so they display even when stdout is captured
-    echo "" >&2
-    echo -e "    ${C_CYAN:-}${prompt}${C_RESET:-}" >&2
-    echo "" >&2
-    echo -e "    ${C_SHADOW:-}Recent:${C_RESET:-}" >&2
+    # Loop until valid selection (don't return on invalid input)
+    while true; do
+        # NOTE: All prompts go to stderr so they display even when stdout is captured
+        echo "" >&2
+        echo -e "    ${C_CYAN:-}${prompt}${C_RESET:-}" >&2
+        echo "" >&2
+        echo -e "    ${C_SHADOW:-}Recent:${C_RESET:-}" >&2
 
-    local i
-    for i in "${!displays[@]}"; do
-        echo -e "    ${C_GHOST:-}[$((i+1))]${C_RESET:-} ${displays[$i]}" >&2
+        local i
+        for i in "${!displays[@]}"; do
+            echo -e "    ${C_GHOST:-}[$((i+1))]${C_RESET:-} ${displays[$i]}" >&2
+        done
+
+        echo "" >&2
+        echo -e "    ${C_GHOST:-}[S]${C_RESET:-} Scan for new" >&2
+        echo -e "    ${C_GHOST:-}[M]${C_RESET:-} Enter manually" >&2
+        echo -e "    ${C_GHOST:-}[0]${C_RESET:-} Cancel" >&2
+        echo "" >&2
+
+        local choice
+        echo -en "    Select: " >&2
+        read -r choice
+        # Trim whitespace
+        choice="${choice//[[:space:]]/}"
+
+        case "${choice,,}" in
+            s|scan)
+                _memory_do_scan "$type" "$scan_func" "$validator"
+                return $?
+                ;;
+            m|manual)
+                _memory_manual_input "$type" "$prompt" "$validator"
+                return $?
+                ;;
+            0|q|quit|cancel)
+                return 1
+                ;;
+            *)
+                if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#items[@]} )); then
+                    local selected="${items[$((choice-1))]}"
+                    # Re-add to bump to top of memory
+                    memory_add "$type" "$selected"
+                    echo "$selected"
+                    return 0
+                fi
+                echo -e "    ${C_RED:-}[!] Invalid selection: '$choice'. Please enter 1-${#items[@]}, S, M, or 0.${C_RESET:-}" >&2
+                sleep 1
+                # Continue loop - re-display menu
+                ;;
+        esac
     done
-
-    echo "" >&2
-    echo -e "    ${C_GHOST:-}[S]${C_RESET:-} Scan for new" >&2
-    echo -e "    ${C_GHOST:-}[M]${C_RESET:-} Enter manually" >&2
-    echo -e "    ${C_GHOST:-}[0]${C_RESET:-} Cancel" >&2
-    echo "" >&2
-
-    local choice
-    read -rp "    Select: " choice
-
-    case "${choice,,}" in
-        s|scan)
-            _memory_do_scan "$type" "$scan_func" "$validator"
-            return $?
-            ;;
-        m|manual)
-            _memory_manual_input "$type" "$prompt" "$validator"
-            return $?
-            ;;
-        0|q|quit|cancel)
-            return 1
-            ;;
-        *)
-            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#items[@]} )); then
-                local selected="${items[$((choice-1))]}"
-                # Re-add to bump to top of memory
-                memory_add "$type" "$selected"
-                echo "$selected"
-                return 0
-            fi
-            echo -e "    ${C_RED:-}Invalid selection: '$choice'${C_RESET:-}" >&2
-            return 1
-            ;;
-    esac
 }
 
 # Internal: prompt for scan when no recent items
@@ -380,26 +387,51 @@ _memory_do_scan() {
         return $?
     fi
 
-    echo -e "    ${C_GREEN:-}Found ${#results[@]} ${type}(s):${C_RESET:-}" >&2
-    echo "" >&2
+    # Loop until valid selection (don't exit on invalid input)
+    while true; do
+        echo "" >&2
+        echo -e "    ${C_GREEN:-}╔══════════════════════════════════════════════════════╗${C_RESET:-}" >&2
+        echo -e "    ${C_GREEN:-}║${C_RESET:-}  Found ${#results[@]} ${type}(s):                                      ${C_GREEN:-}║${C_RESET:-}" >&2
+        echo -e "    ${C_GREEN:-}╠══════════════════════════════════════════════════════╣${C_RESET:-}" >&2
 
-    # Show selection
-    local i
-    for i in "${!results[@]}"; do
-        echo -e "    ${C_GHOST:-}[$((i+1))]${C_RESET:-} ${results[$i]}" >&2
+        # Show selection with clear numbering
+        local i
+        for i in "${!results[@]}"; do
+            printf "    ${C_GREEN:-}║${C_RESET:-}  ${C_CYAN:-}[%2d]${C_RESET:-} %-44s ${C_GREEN:-}║${C_RESET:-}\n" "$((i+1))" "${results[$i]}" >&2
+        done
+
+        echo -e "    ${C_GREEN:-}╠══════════════════════════════════════════════════════╣${C_RESET:-}" >&2
+        echo -e "    ${C_GREEN:-}║${C_RESET:-}  ${C_SHADOW:-}[M] Enter manually  [0] Cancel${C_RESET:-}                    ${C_GREEN:-}║${C_RESET:-}" >&2
+        echo -e "    ${C_GREEN:-}╚══════════════════════════════════════════════════════╝${C_RESET:-}" >&2
+        echo "" >&2
+
+        local choice
+        echo -en "    Select [1-${#results[@]}]: " >&2
+        read -r choice
+        # Trim whitespace
+        choice="${choice//[[:space:]]/}"
+
+        # Handle special commands
+        case "${choice,,}" in
+            m|manual)
+                _memory_manual_input "$type" "Enter $type" "$validator"
+                return $?
+                ;;
+            0|q|quit|cancel)
+                return 1
+                ;;
+        esac
+
+        # Handle numeric selection
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#results[@]} )); then
+            echo "${results[$((choice-1))]}"
+            return 0
+        fi
+
+        echo -e "    ${C_RED:-}[!] Invalid selection: '$choice'. Please enter 1-${#results[@]}, M, or 0.${C_RESET:-}" >&2
+        sleep 1
+        # Continue loop - re-display options
     done
-    echo "" >&2
-
-    local choice
-    read -rp "    Select [1-${#results[@]}]: " choice
-
-    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#results[@]} )); then
-        echo "${results[$((choice-1))]}"
-        return 0
-    fi
-
-    echo -e "    ${C_RED:-}Invalid selection${C_RESET:-}" >&2
-    return 1
 }
 
 # Internal: prompt for manual input

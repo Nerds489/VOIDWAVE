@@ -47,7 +47,9 @@ show_scan_menu() {
         echo ""
 
         local choice
-        read -rp "    Select [0-8]: " choice
+        echo -en "    ${C_PURPLE:-}▶${C_RESET:-} Select [0-8]: "
+        read -r choice
+        choice="${choice//[[:space:]]/}"
 
         case "$choice" in
             1) _scan_quick ;;
@@ -59,7 +61,8 @@ show_scan_menu() {
             7) _scan_udp ;;
             8) _scan_custom ;;
             0) return 0 ;;
-            *) echo -e "    ${C_RED:-}Invalid option${C_RESET:-}"; sleep 1 ;;
+            "") continue ;;
+            *) echo -e "    ${C_RED:-}[!] Invalid option: '$choice'${C_RESET:-}"; sleep 1 ;;
         esac
     done
 }

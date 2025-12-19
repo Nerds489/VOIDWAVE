@@ -46,7 +46,9 @@ show_osint_menu() {
         echo ""
 
         local choice
-        read -rp "    Select [0-7]: " choice
+        echo -en "    ${C_PURPLE:-}▶${C_RESET:-} Select [0-7]: "
+        read -r choice
+        choice="${choice//[[:space:]]/}"
 
         case "$choice" in
             1) _osint_harvester ;;
@@ -57,7 +59,8 @@ show_osint_menu() {
             6) _osint_domain ;;
             7) _osint_full ;;
             0) return 0 ;;
-            *) echo -e "    ${C_RED:-}Invalid option${C_RESET:-}"; sleep 1 ;;
+            "") continue ;;
+            *) echo -e "    ${C_RED:-}[!] Invalid option: '$choice'${C_RESET:-}"; sleep 1 ;;
         esac
     done
 }

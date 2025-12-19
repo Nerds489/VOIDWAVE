@@ -45,7 +45,9 @@ show_recon_menu() {
         echo ""
 
         local choice
-        read -rp "    Select [0-6]: " choice
+        echo -en "    ${C_PURPLE:-}▶${C_RESET:-} Select [0-6]: "
+        read -r choice
+        choice="${choice//[[:space:]]/}"
 
         case "$choice" in
             1) _recon_dns ;;
@@ -55,7 +57,8 @@ show_recon_menu() {
             5) _recon_tech ;;
             6) _recon_full ;;
             0) return 0 ;;
-            *) echo -e "    ${C_RED:-}Invalid option${C_RESET:-}"; sleep 1 ;;
+            "") continue ;;
+            *) echo -e "    ${C_RED:-}[!] Invalid option: '$choice'${C_RESET:-}"; sleep 1 ;;
         esac
     done
 }

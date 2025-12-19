@@ -68,7 +68,9 @@ show_wireless_menu() {
         echo ""
 
         local choice
-        read -rp "    Select [0-8]: " choice
+        echo -en "    ${C_PURPLE:-}▶${C_RESET:-} Select [0-8]: "
+        read -r choice
+        choice="${choice//[[:space:]]/}"
 
         case "$choice" in
             1) _wireless_select_interface ;;
@@ -80,7 +82,8 @@ show_wireless_menu() {
             7) _wireless_wps ;;
             8) _wireless_wifite ;;
             0) return 0 ;;
-            *) echo -e "    ${C_RED:-}Invalid option${C_RESET:-}"; sleep 1 ;;
+            "") continue ;;
+            *) echo -e "    ${C_RED:-}[!] Invalid option: '$choice'${C_RESET:-}"; sleep 1 ;;
         esac
     done
 }
@@ -95,7 +98,6 @@ _show_interface_status() {
 }
 
 _wireless_select_interface() {
-    echo ""
     local -a ifaces=()
     while IFS= read -r iface; do
         [[ -n "$iface" ]] && ifaces+=("$iface")
@@ -107,24 +109,40 @@ _wireless_select_interface() {
         return 1
     fi
 
-    echo -e "    ${C_CYAN:-}Available interfaces:${C_RESET:-}"
-    echo ""
-    for i in "${!ifaces[@]}"; do
-        local mode
-        mode=$(iw dev "${ifaces[$i]}" info 2>/dev/null | awk '/type/{print $2}')
-        echo "    $((i+1))) ${ifaces[$i]} ($mode)"
+    # Loop until valid selection
+    while true; do
+        echo ""
+        echo -e "    ${C_CYAN:-}Available interfaces:${C_RESET:-}"
+        echo ""
+        for i in "${!ifaces[@]}"; do
+            local mode
+            mode=$(iw dev "${ifaces[$i]}" info 2>/dev/null | awk '/type/{print $2}')
+            echo -e "    ${C_CYAN:-}[$((i+1))]${C_RESET:-} ${ifaces[$i]} ${C_SHADOW:-}($mode)${C_RESET:-}"
+        done
+        echo ""
+        echo -e "    ${C_SHADOW:-}[0] Cancel${C_RESET:-}"
+        echo ""
+
+        local choice
+        echo -en "    Select [1-${#ifaces[@]}]: "
+        read -r choice
+        choice="${choice//[[:space:]]/}"
+
+        # Handle cancel
+        if [[ "$choice" == "0" || "$choice" == "q" ]]; then
+            return 0
+        fi
+
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#ifaces[@]} )); then
+            _WIRELESS_IFACE="${ifaces[$((choice-1))]}"
+            echo -e "    ${C_GREEN:-}Selected: $_WIRELESS_IFACE${C_RESET:-}"
+            wait_for_keypress
+            return 0
+        fi
+
+        echo -e "    ${C_RED:-}[!] Invalid selection: '$choice'. Please enter 1-${#ifaces[@]} or 0 to cancel.${C_RESET:-}"
+        sleep 1
     done
-    echo ""
-
-    local choice
-    read -rp "    Select [1-${#ifaces[@]}]: " choice
-
-    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#ifaces[@]} )); then
-        _WIRELESS_IFACE="${ifaces[$((choice-1))]}"
-        echo -e "    ${C_GREEN:-}Selected: $_WIRELESS_IFACE${C_RESET:-}"
-    fi
-
-    wait_for_keypress
 }
 
 _wireless_enable_monitor() {

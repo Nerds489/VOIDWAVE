@@ -110,7 +110,11 @@ print_menu_footer() {
 prompt_choice() {
     local max="$1"
     local choice
-    read -rp "    ${C_PURPLE:-}▶${C_RESET:-} Select [0-${max}]: " choice
+    # Use echo -e + read instead of read -rp to properly interpret ANSI escape codes
+    echo -en "    ${C_PURPLE:-}▶${C_RESET:-} Select [0-${max}]: "
+    read -r choice
+    # Trim whitespace from input
+    choice="${choice//[[:space:]]/}"
     echo "$choice"
 }
 
@@ -636,10 +640,6 @@ _get_wireless_iface() {
 
 _select_wireless_interface() {
     # Direct selection - memory system has issues with command substitution
-    echo ""
-    echo -e "    ${C_CYAN:-}Select wireless interface${C_RESET:-}"
-    echo ""
-
     local -a ifaces=()
     while IFS= read -r iface; do
         [[ -n "$iface" ]] && ifaces+=("$iface")
@@ -650,25 +650,45 @@ _select_wireless_interface() {
         return 1
     fi
 
-    for i in "${!ifaces[@]}"; do
-        local mode
-        mode=$(iw dev "${ifaces[$i]}" info 2>/dev/null | awk '/type/{print $2}')
-        echo -e "    $((i+1))) ${ifaces[$i]} ${C_SHADOW:-}($mode)${C_RESET:-}"
+    # Loop until valid selection (don't exit on invalid input)
+    while true; do
+        echo ""
+        echo -e "    ${C_CYAN:-}Select wireless interface${C_RESET:-}"
+        echo ""
+
+        for i in "${!ifaces[@]}"; do
+            local mode
+            mode=$(iw dev "${ifaces[$i]}" info 2>/dev/null | awk '/type/{print $2}')
+            echo -e "    ${C_CYAN:-}[$((i+1))]${C_RESET:-} ${ifaces[$i]} ${C_SHADOW:-}($mode)${C_RESET:-}"
+        done
+        echo ""
+        echo -e "    ${C_SHADOW:-}[0] Cancel${C_RESET:-}"
+        echo ""
+
+        local num
+        echo -en "    Select [1-${#ifaces[@]}]: "
+        read -r num
+        # Trim whitespace
+        num="${num//[[:space:]]/}"
+
+        # Handle cancel
+        if [[ "$num" == "0" || "$num" == "q" || "$num" == "cancel" ]]; then
+            return 1
+        fi
+
+        # Validate numeric input
+        if [[ "$num" =~ ^[0-9]+$ ]] && [[ "$num" -ge 1 ]] && [[ "$num" -le "${#ifaces[@]}" ]]; then
+            _CURRENT_IFACE="${ifaces[$((num-1))]}"
+            # Save to memory if available
+            type -t memory_add &>/dev/null && memory_add "interface" "$_CURRENT_IFACE"
+            echo -e "    ${C_GREEN:-}Selected: $_CURRENT_IFACE${C_RESET:-}"
+            return 0
+        fi
+
+        echo -e "    ${C_RED:-}[!] Invalid selection: '$num'. Please enter 1-${#ifaces[@]} or 0 to cancel.${C_RESET:-}"
+        sleep 1
+        # Continue loop - re-display menu
     done
-    echo ""
-
-    local num
-    read -rp "    Select [1-${#ifaces[@]}]: " num
-    if [[ "$num" =~ ^[0-9]+$ ]] && [[ "$num" -ge 1 ]] && [[ "$num" -le "${#ifaces[@]}" ]]; then
-        _CURRENT_IFACE="${ifaces[$((num-1))]}"
-        # Save to memory if available
-        type -t memory_add &>/dev/null && memory_add "interface" "$_CURRENT_IFACE"
-        echo -e "    ${C_GREEN:-}Selected: $_CURRENT_IFACE${C_RESET:-}"
-        return 0
-    fi
-
-    echo -e "    ${C_RED:-}Invalid selection${C_RESET:-}"
-    return 1
 }
 
 _enable_monitor_mode() {

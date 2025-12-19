@@ -562,7 +562,6 @@ show_wireless_menu_new() {
 
 _handle_wireless_choice() {
     local choice="$1"
-    local iface="${_MONITOR_IFACE:-$_CURRENT_IFACE}"
     local bssid channel essid client
 
     case "$choice" in
@@ -573,7 +572,7 @@ _handle_wireless_choice() {
         4) _mac_spoof_menu ;;
 
         # Scanning
-        5) [[ -n "$iface" ]] && airodump-ng "$iface" || echo "No interface selected" ;;
+        5) _wireless_scan_networks ;;
         6) _detailed_target_scan ;;
 
         # WPS Attacks
@@ -613,28 +612,38 @@ _handle_wireless_choice() {
 }
 
 # Wireless helper functions
-_select_wireless_interface() {
-    # Use memory system if available
-    if type -t get_resource_with_memory &>/dev/null; then
-        local selected
-        selected=$(get_resource_with_memory "interface" "Select wireless interface" "_scan_wireless_interfaces")
-        if [[ -n "$selected" ]]; then
-            _CURRENT_IFACE="$selected"
-            echo -e "    ${C_GREEN:-}Selected: $_CURRENT_IFACE${C_RESET:-}"
-            return 0
-        fi
-        return 1
-    fi
 
-    # Fallback to direct selection
+# Ensure interface is selected, auto-select if not
+_ensure_interface() {
+    if [[ -z "$_CURRENT_IFACE" ]]; then
+        _select_wireless_interface || return 1
+    fi
+    return 0
+}
+
+# Ensure monitor mode is enabled, auto-enable if not
+_ensure_monitor_mode() {
+    if [[ -z "$_MONITOR_IFACE" ]]; then
+        _enable_monitor_mode || return 1
+    fi
+    return 0
+}
+
+# Get the best available interface (monitor if available, else current)
+_get_wireless_iface() {
+    echo "${_MONITOR_IFACE:-$_CURRENT_IFACE}"
+}
+
+_select_wireless_interface() {
+    # Direct selection - memory system has issues with command substitution
     echo ""
-    echo -e "    ${C_CYAN:-}Available Interfaces:${C_RESET:-}"
+    echo -e "    ${C_CYAN:-}Select wireless interface${C_RESET:-}"
+    echo ""
+
     local -a ifaces=()
     while IFS= read -r iface; do
         [[ -n "$iface" ]] && ifaces+=("$iface")
-    done < <(ls /sys/class/net/ 2>/dev/null | while read -r i; do
-        [[ -d "/sys/class/net/$i/wireless" ]] && echo "$i"
-    done)
+    done < <(iw dev 2>/dev/null | awk '/Interface/{print $2}')
 
     if [[ ${#ifaces[@]} -eq 0 ]]; then
         echo -e "    ${C_RED:-}No wireless interfaces found${C_RESET:-}"
@@ -642,36 +651,63 @@ _select_wireless_interface() {
     fi
 
     for i in "${!ifaces[@]}"; do
-        echo -e "    $((i+1))) ${ifaces[$i]}"
+        local mode
+        mode=$(iw dev "${ifaces[$i]}" info 2>/dev/null | awk '/type/{print $2}')
+        echo -e "    $((i+1))) ${ifaces[$i]} ${C_SHADOW:-}($mode)${C_RESET:-}"
     done
+    echo ""
 
+    local num
     read -rp "    Select [1-${#ifaces[@]}]: " num
     if [[ "$num" =~ ^[0-9]+$ ]] && [[ "$num" -ge 1 ]] && [[ "$num" -le "${#ifaces[@]}" ]]; then
         _CURRENT_IFACE="${ifaces[$((num-1))]}"
-        # Save to memory
+        # Save to memory if available
         type -t memory_add &>/dev/null && memory_add "interface" "$_CURRENT_IFACE"
         echo -e "    ${C_GREEN:-}Selected: $_CURRENT_IFACE${C_RESET:-}"
+        return 0
     fi
+
+    echo -e "    ${C_RED:-}Invalid selection${C_RESET:-}"
+    return 1
 }
 
 _enable_monitor_mode() {
-    local iface="${_CURRENT_IFACE:-}"
-    [[ -z "$iface" ]] && { read -rp "    Interface: " iface; }
-    [[ -z "$iface" ]] && { echo -e "    ${C_RED:-}No interface specified${C_RESET:-}"; return 1; }
+    # Auto-select interface if not set
+    if [[ -z "$_CURRENT_IFACE" ]]; then
+        _select_wireless_interface || return 1
+    fi
 
+    local iface="$_CURRENT_IFACE"
+
+    echo ""
     echo -e "    ${C_CYAN:-}Enabling monitor mode on $iface...${C_RESET:-}"
-    airmon-ng check kill &>/dev/null
-    airmon-ng start "$iface" &>/dev/null
+    airmon-ng check kill 2>&1 | sed 's/^/    /'
+
+    if ! airmon-ng start "$iface" 2>&1 | sed 's/^/    /'; then
+        echo -e "    ${C_RED:-}Failed to start airmon-ng${C_RESET:-}"
+        return 1
+    fi
 
     # Find new monitor interface
+    sleep 1  # Give system time to create interface
     _MONITOR_IFACE=$(ls /sys/class/net/ 2>/dev/null | grep -E "${iface}mon|mon[0-9]" | head -1)
-    [[ -z "$_MONITOR_IFACE" ]] && _MONITOR_IFACE="${iface}mon"
 
-    if [[ -d "/sys/class/net/$_MONITOR_IFACE" ]]; then
+    # Check if interface changed to monitor mode in-place
+    if [[ -z "$_MONITOR_IFACE" ]]; then
+        if iw dev "$iface" info 2>/dev/null | grep -q "type monitor"; then
+            _MONITOR_IFACE="$iface"
+        else
+            _MONITOR_IFACE="${iface}mon"
+        fi
+    fi
+
+    if [[ -d "/sys/class/net/$_MONITOR_IFACE" ]] || iw dev "$_MONITOR_IFACE" info &>/dev/null; then
+        echo ""
         echo -e "    ${C_GREEN:-}Monitor mode enabled: $_MONITOR_IFACE${C_RESET:-}"
     else
         echo -e "    ${C_RED:-}Failed to enable monitor mode${C_RESET:-}"
         _MONITOR_IFACE=""
+        return 1
     fi
 }
 
@@ -688,22 +724,78 @@ _disable_monitor_mode() {
 }
 
 _mac_spoof_menu() {
-    local iface="${_CURRENT_IFACE:-}"
-    [[ -z "$iface" ]] && { read -rp "    Interface: " iface; }
+    # Auto-select interface if not set
+    if [[ -z "$_CURRENT_IFACE" ]]; then
+        _select_wireless_interface || return 1
+    fi
 
+    local iface="$_CURRENT_IFACE"
+
+    echo ""
+    echo -e "    ${C_CYAN:-}MAC Spoof - Interface: $iface${C_RESET:-}"
     echo ""
     echo "    1) Random MAC"
     echo "    2) Specific MAC"
     echo "    3) Vendor (Intel)"
     echo "    4) Restore Original"
+    echo "    0) Cancel"
+    echo ""
     read -rp "    Select: " opt
 
     case "$opt" in
-        1) mac_randomize "$iface" 2>/dev/null || macchanger -r "$iface" ;;
-        2) read -rp "    MAC: " mac; mac_clone "$iface" "$mac" 2>/dev/null || macchanger -m "$mac" "$iface" ;;
-        3) mac_spoof_vendor "$iface" intel 2>/dev/null || macchanger -a "$iface" ;;
-        4) mac_restore "$iface" 2>/dev/null || macchanger -p "$iface" ;;
+        1) mac_randomize "$iface" 2>/dev/null || macchanger -r "$iface" 2>&1 | sed 's/^/    /' ;;
+        2) read -rp "    MAC: " mac; mac_clone "$iface" "$mac" 2>/dev/null || macchanger -m "$mac" "$iface" 2>&1 | sed 's/^/    /' ;;
+        3) mac_spoof_vendor "$iface" intel 2>/dev/null || macchanger -a "$iface" 2>&1 | sed 's/^/    /' ;;
+        4) mac_restore "$iface" 2>/dev/null || macchanger -p "$iface" 2>&1 | sed 's/^/    /' ;;
+        0) return 0 ;;
     esac
+}
+
+# Scan for wireless networks
+_wireless_scan_networks() {
+    # Ensure we have an interface (prefer monitor mode)
+    _ensure_interface || return 1
+
+    local iface="${_MONITOR_IFACE:-$_CURRENT_IFACE}"
+
+    echo ""
+    echo -e "    ${C_CYAN:-}Scanning networks on $iface${C_RESET:-}"
+    echo -e "    ${C_YELLOW:-}Press Ctrl+C to stop${C_RESET:-}"
+    echo ""
+
+    local duration
+    read -rp "    Duration in seconds [30]: " duration
+    duration="${duration:-30}"
+
+    timeout "$duration" airodump-ng "$iface" 2>/dev/null || true
+}
+
+# Detailed target scan
+_detailed_target_scan() {
+    _ensure_interface || return 1
+
+    local iface="${_MONITOR_IFACE:-$_CURRENT_IFACE}"
+
+    echo ""
+    echo -e "    ${C_CYAN:-}Detailed network scan on $iface${C_RESET:-}"
+    echo ""
+
+    local bssid
+    read -rp "    Target BSSID (or blank for all): " bssid
+
+    local channel
+    read -rp "    Channel (or blank for hopping): " channel
+
+    echo ""
+    echo -e "    ${C_YELLOW:-}Press Ctrl+C to stop${C_RESET:-}"
+    echo ""
+
+    local cmd="airodump-ng"
+    [[ -n "$bssid" ]] && cmd="$cmd --bssid $bssid"
+    [[ -n "$channel" ]] && cmd="$cmd -c $channel"
+    cmd="$cmd $iface"
+
+    eval "$cmd" 2>/dev/null || true
 }
 
 # Get wireless AP target with memory support
@@ -799,8 +891,8 @@ _detailed_target_scan() {
 }
 
 _wps_pixie_attack() {
-    local iface="${_MONITOR_IFACE:-$_CURRENT_IFACE}"
-    [[ -z "$iface" ]] && { echo -e "    ${C_RED:-}No interface${C_RESET:-}"; return 1; }
+    _ensure_monitor_mode || return 1
+    local iface="$_MONITOR_IFACE"
 
     local target_info bssid channel
     target_info=$(_get_target_info) || return 1
@@ -815,8 +907,8 @@ _wps_pixie_attack() {
 }
 
 _wps_bruteforce_attack() {
-    local iface="${_MONITOR_IFACE:-$_CURRENT_IFACE}"
-    [[ -z "$iface" ]] && { echo -e "    ${C_RED:-}No interface${C_RESET:-}"; return 1; }
+    _ensure_monitor_mode || return 1
+    local iface="$_MONITOR_IFACE"
 
     local target_info bssid channel
     target_info=$(_get_target_info) || return 1
@@ -831,8 +923,8 @@ _wps_bruteforce_attack() {
 }
 
 _wps_known_pins() {
-    local iface="${_MONITOR_IFACE:-$_CURRENT_IFACE}"
-    [[ -z "$iface" ]] && { echo -e "    ${C_RED:-}No interface${C_RESET:-}"; return 1; }
+    _ensure_monitor_mode || return 1
+    local iface="$_MONITOR_IFACE"
 
     local target_info bssid channel
     target_info=$(_get_target_info) || return 1
@@ -847,8 +939,8 @@ _wps_known_pins() {
 }
 
 _wps_algorithm_pins() {
-    local iface="${_MONITOR_IFACE:-$_CURRENT_IFACE}"
-    [[ -z "$iface" ]] && { echo -e "    ${C_RED:-}No interface${C_RESET:-}"; return 1; }
+    _ensure_monitor_mode || return 1
+    local iface="$_MONITOR_IFACE"
 
     local target_info bssid channel
     target_info=$(_get_target_info) || return 1
@@ -863,8 +955,8 @@ _wps_algorithm_pins() {
 }
 
 _pmkid_capture() {
-    local iface="${_MONITOR_IFACE:-$_CURRENT_IFACE}"
-    [[ -z "$iface" ]] && { echo -e "    ${C_RED:-}No interface${C_RESET:-}"; return 1; }
+    _ensure_monitor_mode || return 1
+    local iface="$_MONITOR_IFACE"
 
     local target_info bssid essid
     target_info=$(_get_target_info) || return 1
@@ -881,8 +973,8 @@ _pmkid_capture() {
 }
 
 _handshake_capture() {
-    local iface="${_MONITOR_IFACE:-$_CURRENT_IFACE}"
-    [[ -z "$iface" ]] && { echo -e "    ${C_RED:-}No interface${C_RESET:-}"; return 1; }
+    _ensure_monitor_mode || return 1
+    local iface="$_MONITOR_IFACE"
 
     local target_info bssid channel essid
     target_info=$(_get_target_info) || return 1
@@ -905,8 +997,8 @@ _handshake_capture() {
 }
 
 _smart_handshake_capture() {
-    local iface="${_MONITOR_IFACE:-$_CURRENT_IFACE}"
-    [[ -z "$iface" ]] && { echo -e "    ${C_RED:-}No interface${C_RESET:-}"; return 1; }
+    _ensure_monitor_mode || return 1
+    local iface="$_MONITOR_IFACE"
 
     local target_info bssid channel essid
     target_info=$(_get_target_info) || return 1
@@ -922,12 +1014,18 @@ _smart_handshake_capture() {
 }
 
 _eviltwin_full() {
+    _ensure_interface || return 1
+
     local ap_iface deauth_iface ssid bssid channel lang
 
     echo ""
     echo -e "    ${C_CYAN:-}Evil Twin requires 2 interfaces (or VIF support)${C_RESET:-}"
-    read -rp "    AP Interface: " ap_iface
-    read -rp "    Deauth Interface: " deauth_iface
+    echo -e "    ${C_SHADOW:-}Current interface: $_CURRENT_IFACE${C_RESET:-}"
+    echo ""
+    read -rp "    AP Interface [$_CURRENT_IFACE]: " ap_iface
+    ap_iface="${ap_iface:-$_CURRENT_IFACE}"
+    read -rp "    Deauth Interface (or same for VIF): " deauth_iface
+    deauth_iface="${deauth_iface:-$ap_iface}"
     read -rp "    SSID to clone: " ssid
     read -rp "    Target BSSID: " bssid
     read -rp "    Channel: " channel
@@ -941,8 +1039,14 @@ _eviltwin_full() {
 }
 
 _eviltwin_simple() {
-    local iface ssid channel
-    read -rp "    Interface: " iface
+    _ensure_interface || return 1
+
+    local iface="$_CURRENT_IFACE"
+    local ssid channel
+
+    echo ""
+    read -rp "    Interface [$iface]: " input_iface
+    iface="${input_iface:-$iface}"
     read -rp "    SSID: " ssid
     read -rp "    Channel [6]: " channel
 
@@ -954,8 +1058,14 @@ _eviltwin_simple() {
 }
 
 _eviltwin_wpa() {
-    local iface ssid channel password
-    read -rp "    Interface: " iface
+    _ensure_interface || return 1
+
+    local iface="$_CURRENT_IFACE"
+    local ssid channel password
+
+    echo ""
+    read -rp "    Interface [$iface]: " input_iface
+    iface="${input_iface:-$iface}"
     read -rp "    SSID: " ssid
     read -rp "    Channel [6]: " channel
     read -rp "    WPA Password: " password
@@ -968,8 +1078,8 @@ _eviltwin_wpa() {
 }
 
 _deauth_attack() {
-    local iface="${_MONITOR_IFACE:-$_CURRENT_IFACE}"
-    [[ -z "$iface" ]] && { echo -e "    ${C_RED:-}No interface${C_RESET:-}"; return 1; }
+    _ensure_monitor_mode || return 1
+    local iface="$_MONITOR_IFACE"
 
     local target_info bssid client count
     target_info=$(_get_target_info) || return 1
@@ -990,8 +1100,8 @@ _deauth_attack() {
 }
 
 _amok_mode() {
-    local iface="${_MONITOR_IFACE:-$_CURRENT_IFACE}"
-    [[ -z "$iface" ]] && { echo -e "    ${C_RED:-}No interface${C_RESET:-}"; return 1; }
+    _ensure_monitor_mode || return 1
+    local iface="$_MONITOR_IFACE"
 
     if type -t dos_amok_mode &>/dev/null; then
         dos_amok_mode "$iface"
@@ -1005,8 +1115,8 @@ _amok_mode() {
 }
 
 _beacon_flood() {
-    local iface="${_MONITOR_IFACE:-$_CURRENT_IFACE}"
-    [[ -z "$iface" ]] && { echo -e "    ${C_RED:-}No interface${C_RESET:-}"; return 1; }
+    _ensure_monitor_mode || return 1
+    local iface="$_MONITOR_IFACE"
 
     if type -t dos_beacon_flood &>/dev/null; then
         dos_beacon_flood "$iface"
@@ -1018,8 +1128,8 @@ _beacon_flood() {
 }
 
 _pursuit_mode() {
-    local iface="${_MONITOR_IFACE:-$_CURRENT_IFACE}"
-    [[ -z "$iface" ]] && { echo -e "    ${C_RED:-}No interface${C_RESET:-}"; return 1; }
+    _ensure_monitor_mode || return 1
+    local iface="$_MONITOR_IFACE"
 
     local target_info bssid
     target_info=$(_get_target_info) || return 1
@@ -1033,8 +1143,8 @@ _pursuit_mode() {
 }
 
 _wep_attack_menu() {
-    local iface="${_MONITOR_IFACE:-$_CURRENT_IFACE}"
-    [[ -z "$iface" ]] && { echo -e "    ${C_RED:-}No interface${C_RESET:-}"; return 1; }
+    _ensure_monitor_mode || return 1
+    local iface="$_MONITOR_IFACE"
 
     local target_info bssid channel essid
     target_info=$(_get_target_info) || return 1
@@ -1054,10 +1164,18 @@ _wep_attack_menu() {
 }
 
 _enterprise_attack() {
+    _ensure_interface || return 1
+
     local ap_iface deauth_iface ssid bssid channel
 
-    read -rp "    AP Interface: " ap_iface
-    read -rp "    Deauth Interface: " deauth_iface
+    echo ""
+    echo -e "    ${C_CYAN:-}Enterprise Attack (WPA-Enterprise)${C_RESET:-}"
+    echo -e "    ${C_SHADOW:-}Current interface: $_CURRENT_IFACE${C_RESET:-}"
+    echo ""
+    read -rp "    AP Interface [$_CURRENT_IFACE]: " ap_iface
+    ap_iface="${ap_iface:-$_CURRENT_IFACE}"
+    read -rp "    Deauth Interface (or same): " deauth_iface
+    deauth_iface="${deauth_iface:-$ap_iface}"
     read -rp "    SSID: " ssid
     read -rp "    Target BSSID: " bssid
     read -rp "    Channel: " channel
@@ -1070,8 +1188,8 @@ _enterprise_attack() {
 }
 
 _hidden_ssid_reveal() {
-    local iface="${_MONITOR_IFACE:-$_CURRENT_IFACE}"
-    [[ -z "$iface" ]] && { echo -e "    ${C_RED:-}No interface${C_RESET:-}"; return 1; }
+    _ensure_monitor_mode || return 1
+    local iface="$_MONITOR_IFACE"
 
     local target_info bssid channel
     target_info=$(_get_target_info) || return 1
@@ -1086,8 +1204,8 @@ _hidden_ssid_reveal() {
 }
 
 _wpa3_check() {
-    local iface="${_MONITOR_IFACE:-$_CURRENT_IFACE}"
-    [[ -z "$iface" ]] && { echo -e "    ${C_RED:-}No interface${C_RESET:-}"; return 1; }
+    _ensure_monitor_mode || return 1
+    local iface="$_MONITOR_IFACE"
 
     local target_info bssid channel
     target_info=$(_get_target_info) || return 1

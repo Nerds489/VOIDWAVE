@@ -51,16 +51,21 @@ main() {
 
     local removed=0
 
-    # Remove wrapper scripts from bin directory
-    for f in "$BIN_DIR/voidwave" "$BIN_DIR/voidwave-install"; do
-        if [[ -f "$f" || -L "$f" ]]; then
-            if rm -f "$f" 2>/dev/null; then
-                success "Removed: $f"
-                ((removed++)) || true
-            else
-                warn "Could not remove: $f (permission denied?)"
+    # All possible bin directories
+    local -a bin_dirs=("$BIN_DIR" "/usr/bin" "$USER_HOME/.local/bin")
+
+    # Remove wrapper scripts/symlinks from all bin directories
+    for bindir in "${bin_dirs[@]}"; do
+        for f in "$bindir/voidwave" "$bindir/voidwave-install" "$bindir/voidwave-distrobox"; do
+            if [[ -f "$f" || -L "$f" ]]; then
+                if rm -f "$f" 2>/dev/null; then
+                    success "Removed: $f"
+                    ((removed++)) || true
+                else
+                    warn "Could not remove: $f (permission denied?)"
+                fi
             fi
-        fi
+        done
     done
 
     # Remove install roots

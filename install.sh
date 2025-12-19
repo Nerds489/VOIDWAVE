@@ -103,12 +103,12 @@ Options:
   --help        Show this help message
 
 System Install (requires root):
-  Installs to: /opt/voidwave (preferred) or /usr/local/lib/voidwave
-  Wrapper to:  /usr/local/bin or /usr/bin
+  Installs to: /usr/local/share/voidwave (preferred) or /opt/voidwave
+  Symlinks to: /usr/local/bin or /usr/bin
 
 User Install (no root required):
   Installs to: ~/.local/share/voidwave
-  Wrapper to:  ~/.local/bin
+  Symlinks to: ~/.local/bin
 
 Examples:
   sudo ./install.sh                    # Standard system install
@@ -206,8 +206,14 @@ _select_install_locations() {
 
     # Force user install on immutable systems
     if [[ $IS_IMMUTABLE -eq 1 ]] && [[ $OPT_USER -eq 0 ]]; then
-        _warn "Immutable system detected (SteamOS/Silverblue/etc.)"
+        _warn "Immutable system detected (SteamOS/Silverblue/Bazzite/etc.)"
         _warn "Forcing user-mode installation to ~/.local/share/voidwave"
+        echo
+        echo "[i] For full functionality on immutable systems, consider using:"
+        echo "    voidwave-distrobox create   # Create a Kali container"
+        echo "    voidwave-distrobox setup    # Install pentesting tools"
+        echo "    voidwave-distrobox enter    # Enter the container"
+        echo
         OPT_USER=1
     fi
 
@@ -223,7 +229,8 @@ _select_install_locations() {
         fi
     else
         # System install - try locations in priority order
-        local -a roots=("/opt/voidwave" "/usr/local/lib/voidwave" "/usr/lib/voidwave")
+        # Prefer /usr/local/share/voidwave (FHS compliant for shared data)
+        local -a roots=("/usr/local/share/voidwave" "/opt/voidwave" "/usr/local/lib/voidwave" "/usr/lib/voidwave")
         INSTALL_ROOT=""
 
         for root in "${roots[@]}"; do
@@ -267,7 +274,7 @@ _select_install_locations() {
 _do_uninstall() {
     _log "Uninstalling VOIDWAVE..."
 
-    local -a roots=("/opt/voidwave" "/usr/local/lib/voidwave" "/usr/lib/voidwave" "${HOME}/.local/share/voidwave")
+    local -a roots=("/usr/local/share/voidwave" "/opt/voidwave" "/usr/local/lib/voidwave" "/usr/lib/voidwave" "${HOME}/.local/share/voidwave")
     local -a bins=("/usr/local/bin" "/usr/bin" "${HOME}/.local/bin")
     local uninstall_removed_any=0
     local uninstall_failed_any=0
@@ -285,11 +292,11 @@ _do_uninstall() {
         fi
     done
 
-    # Remove wrappers
+    # Remove wrappers/symlinks
     for bindir in "${bins[@]}"; do
-        for wrapper in "$bindir/voidwave" "$bindir/voidwave-install"; do
-            if [[ -f "$wrapper" ]]; then
-                _log "Removing wrapper: $wrapper"
+        for wrapper in "$bindir/voidwave" "$bindir/voidwave-install" "$bindir/voidwave-distrobox"; do
+            if [[ -f "$wrapper" ]] || [[ -L "$wrapper" ]]; then
+                _log "Removing: $wrapper"
                 if rm -f "$wrapper" 2>/dev/null; then
                     uninstall_removed_any=1
                 else
@@ -456,33 +463,21 @@ _do_install() {
     # Create bin directory if needed
     mkdir -p "$BIN_DIR"
 
-    # Remove any existing wrappers in target bin dir
-    rm -f "$BIN_DIR/voidwave" "$BIN_DIR/voidwave-install" 2>/dev/null || true
+    # Remove any existing symlinks/wrappers in target bin dir
+    rm -f "$BIN_DIR/voidwave" "$BIN_DIR/voidwave-install" "$BIN_DIR/voidwave-distrobox" 2>/dev/null || true
 
-    # Create voidwave wrapper
-    _log "Creating wrapper: $BIN_DIR/voidwave"
-    cat > "$BIN_DIR/voidwave" << WRAPPER
-#!/usr/bin/env bash
-# VOIDWAVE wrapper - installed by install.sh
-# Install root: $INSTALL_ROOT
+    # Create symlinks (the binaries now resolve VOIDWAVE_ROOT by following symlinks)
+    _log "Creating symlink: $BIN_DIR/voidwave -> $INSTALL_ROOT/bin/voidwave"
+    ln -sf "$INSTALL_ROOT/bin/voidwave" "$BIN_DIR/voidwave"
 
-export VOIDWAVE_ROOT="$INSTALL_ROOT"
-exec "\$VOIDWAVE_ROOT/bin/voidwave" "\$@"
-WRAPPER
-    chmod 755 "$BIN_DIR/voidwave"
-
-    # Create voidwave-install wrapper
     if [[ -f "$INSTALL_ROOT/bin/voidwave-install" ]]; then
-        _log "Creating wrapper: $BIN_DIR/voidwave-install"
-        cat > "$BIN_DIR/voidwave-install" << WRAPPER
-#!/usr/bin/env bash
-# VOIDWAVE installer wrapper - installed by install.sh
-# Install root: $INSTALL_ROOT
+        _log "Creating symlink: $BIN_DIR/voidwave-install -> $INSTALL_ROOT/bin/voidwave-install"
+        ln -sf "$INSTALL_ROOT/bin/voidwave-install" "$BIN_DIR/voidwave-install"
+    fi
 
-export VOIDWAVE_ROOT="$INSTALL_ROOT"
-exec "\$VOIDWAVE_ROOT/bin/voidwave-install" "\$@"
-WRAPPER
-        chmod 755 "$BIN_DIR/voidwave-install"
+    if [[ -f "$INSTALL_ROOT/bin/voidwave-distrobox" ]]; then
+        _log "Creating symlink: $BIN_DIR/voidwave-distrobox -> $INSTALL_ROOT/bin/voidwave-distrobox"
+        ln -sf "$INSTALL_ROOT/bin/voidwave-distrobox" "$BIN_DIR/voidwave-distrobox"
     fi
 
     # Handle PATH configuration
@@ -613,8 +608,20 @@ _verify_installation() {
         errors=$((errors + 1))
     fi
 
-    # 3. Check wrapper is small (<100KB - not a monolith)
-    if [[ -f "$wrapper_path" ]]; then
+    # 3. Check symlink or small wrapper (not a monolith)
+    if [[ -L "$wrapper_path" ]]; then
+        # It's a symlink - verify it points to the right place
+        local link_target
+        link_target=$(readlink -f "$wrapper_path" 2>/dev/null || readlink "$wrapper_path" 2>/dev/null)
+        if [[ "$link_target" != "$INSTALL_ROOT/bin/voidwave" ]]; then
+            _error "VERIFY FAILED: Symlink points to wrong location"
+            _error "Expected: $INSTALL_ROOT/bin/voidwave"
+            _error "Got: $link_target"
+            errors=$((errors + 1))
+        else
+            _log "Symlink verified: $wrapper_path -> $link_target"
+        fi
+    elif [[ -f "$wrapper_path" ]]; then
         local wrapper_size
         wrapper_size=$(stat -c%s "$wrapper_path" 2>/dev/null || stat -f%z "$wrapper_path" 2>/dev/null || echo "0")
         if [[ "$wrapper_size" -gt 100000 ]]; then
@@ -624,29 +631,20 @@ _verify_installation() {
         fi
     fi
 
-    # 4. Check wrapper contains VOIDWAVE_ROOT export
-    if [[ -f "$wrapper_path" ]]; then
-        if ! grep -q 'export VOIDWAVE_ROOT=' "$wrapper_path" 2>/dev/null; then
-            _error "VERIFY FAILED: Wrapper missing VOIDWAVE_ROOT export"
-            errors=$((errors + 1))
-        fi
+    # 4. Check that the target script exists and is executable
+    if [[ ! -x "$INSTALL_ROOT/bin/voidwave" ]]; then
+        _error "VERIFY FAILED: $INSTALL_ROOT/bin/voidwave not executable"
+        errors=$((errors + 1))
     fi
 
-    # 5. Check VOIDWAVE_ROOT points to install root (not source repo)
-    if [[ -f "$wrapper_path" ]]; then
-        local embedded_root
-        embedded_root=$(grep 'export VOIDWAVE_ROOT=' "$wrapper_path" | sed 's/.*VOIDWAVE_ROOT="\([^"]*\)".*/\1/' | head -1)
-        if [[ "$embedded_root" != "$INSTALL_ROOT" ]]; then
-            _error "VERIFY FAILED: VOIDWAVE_ROOT points to wrong location"
-            _error "Expected: $INSTALL_ROOT"
-            _error "Got: $embedded_root"
-            errors=$((errors + 1))
-        fi
-        # Also verify it's not pointing to a /home/* path (source repo)
-        if [[ "$embedded_root" == /home/* ]] && [[ "$OPT_USER" -ne 1 ]]; then
-            _error "VERIFY FAILED: VOIDWAVE_ROOT points to home directory"
+    # 5. Check symlink target resolves correctly for system install
+    if [[ "$OPT_USER" -ne 1 ]]; then
+        local resolved_target
+        resolved_target=$(readlink -f "$wrapper_path" 2>/dev/null || echo "")
+        if [[ -n "$resolved_target" ]] && [[ "$resolved_target" == /home/* ]]; then
+            _error "VERIFY FAILED: Symlink resolves to home directory"
             _error "System installs must not reference user home directories"
-            _error "Got: $embedded_root"
+            _error "Got: $resolved_target"
             errors=$((errors + 1))
         fi
     fi

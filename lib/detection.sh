@@ -71,6 +71,7 @@ declare -g PKG_REMOVE=""
 
 # Special system flags
 declare -g IS_IMMUTABLE=0      # Immutable root filesystem (SteamOS, Silverblue, etc.)
+declare -g IMMUTABLE_TYPE=""   # Type of immutable system: rpm-ostree, steamos, chimeraos, nixos, ostree
 declare -g IS_WSL=0            # Windows Subsystem for Linux
 declare -g IS_CONTAINER=0      # Running in Docker/Podman/LXC
 declare -g IS_STEAMDECK=0      # Steam Deck specifically
@@ -113,11 +114,12 @@ detect_distro() {
 #═══════════════════════════════════════════════════════════════════════════════
 
 # Detect if running on an immutable/atomic Linux distribution
-# Sets IS_IMMUTABLE=1 if true
+# Sets IS_IMMUTABLE=1 if true, and IMMUTABLE_TYPE to the specific type
 # Immutable distros: SteamOS, Fedora Silverblue/Kinoite, VanillaOS, Bazzite, etc.
 detect_immutable_system() {
     IS_IMMUTABLE=0
     IS_STEAMDECK=0
+    IMMUTABLE_TYPE=""
 
     # Method 1: Check for SteamOS specifically
     if [[ -f /etc/os-release ]]; then
@@ -129,32 +131,46 @@ detect_immutable_system() {
         if [[ "$os_id" == "steamos" ]]; then
             IS_IMMUTABLE=1
             IS_STEAMDECK=1
+            IMMUTABLE_TYPE="steamos"
             return 0
         fi
 
-        # Bazzite (Steam Deck alternative)
+        # Bazzite (Steam Deck alternative / Universal Blue)
         if [[ "$os_id" == "bazzite" ]]; then
             IS_IMMUTABLE=1
             IS_STEAMDECK=1
+            IMMUTABLE_TYPE="rpm-ostree"
             return 0
         fi
 
         # ChimeraOS (another Steam Deck-like distro)
         if [[ "$os_id" == "chimeraos" ]]; then
             IS_IMMUTABLE=1
+            IMMUTABLE_TYPE="chimeraos"
             return 0
         fi
+
+        # Universal Blue variants (Bluefin, Aurora, etc.)
+        case "$os_id" in
+            bluefin|aurora|ublue-os)
+                IS_IMMUTABLE=1
+                IMMUTABLE_TYPE="rpm-ostree"
+                return 0
+                ;;
+        esac
     fi
 
     # Method 2: Check for rpm-ostree based systems (Silverblue, Kinoite, etc.)
     if command -v rpm-ostree &>/dev/null; then
         IS_IMMUTABLE=1
+        IMMUTABLE_TYPE="rpm-ostree"
         return 0
     fi
 
     # Method 3: Check for ostree deployments
     if [[ -d /ostree ]] || [[ -d /sysroot/ostree ]]; then
         IS_IMMUTABLE=1
+        IMMUTABLE_TYPE="ostree"
         return 0
     fi
 
@@ -167,6 +183,7 @@ detect_immutable_system() {
         case "$os_id" in
             vanilla|blendos|carbonos)
                 IS_IMMUTABLE=1
+                IMMUTABLE_TYPE="apx"
                 return 0
                 ;;
         esac
@@ -175,12 +192,14 @@ detect_immutable_system() {
     # Method 5: Check for NixOS (also immutable in a sense)
     if [[ -f /etc/NIXOS ]] || [[ -d /nix/store ]]; then
         IS_IMMUTABLE=1
+        IMMUTABLE_TYPE="nixos"
         return 0
     fi
 
     # Method 6: Check if root is actually read-only mounted
     if grep -q " / .*\bro\b" /proc/mounts 2>/dev/null; then
         IS_IMMUTABLE=1
+        IMMUTABLE_TYPE="readonly"
         return 0
     fi
 
@@ -263,6 +282,202 @@ can_system_install() {
     fi
 
     return 1
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# IMMUTABLE SYSTEM HELPERS
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Unlock immutable filesystem for package installation
+# Returns 0 on success, 1 on failure
+# Note: This is primarily for SteamOS/ChimeraOS; rpm-ostree systems don't need unlocking
+unlock_immutable_filesystem() {
+    [[ $IS_IMMUTABLE -eq 0 ]] && return 0
+
+    case "$IMMUTABLE_TYPE" in
+        steamos)
+            log_info "Unlocking SteamOS filesystem..."
+            if command -v steamos-readonly &>/dev/null; then
+                if ! steamos-readonly disable 2>/dev/null; then
+                    log_error "Failed to unlock SteamOS filesystem"
+                    log_info "Try manually: sudo steamos-readonly disable"
+                    return 1
+                fi
+                # Initialize pacman keyring if needed
+                if [[ ! -d /etc/pacman.d/gnupg ]] || [[ ! -f /etc/pacman.d/gnupg/pubring.gpg ]]; then
+                    log_info "Initializing pacman keyring..."
+                    pacman-key --init 2>/dev/null || true
+                    pacman-key --populate archlinux 2>/dev/null || true
+                fi
+                log_success "SteamOS filesystem unlocked"
+                return 0
+            else
+                log_error "steamos-readonly command not found"
+                return 1
+            fi
+            ;;
+        chimeraos)
+            log_info "Unlocking ChimeraOS filesystem..."
+            if command -v frzr-unlock &>/dev/null; then
+                if ! frzr-unlock 2>/dev/null; then
+                    # Fallback: try direct remount
+                    mount -o remount,rw / 2>/dev/null || {
+                        log_error "Failed to unlock ChimeraOS filesystem"
+                        return 1
+                    }
+                fi
+                log_success "ChimeraOS filesystem unlocked"
+                return 0
+            else
+                # Fallback method
+                mount -o remount,rw / 2>/dev/null || {
+                    log_error "Failed to unlock ChimeraOS filesystem"
+                    return 1
+                }
+                log_success "ChimeraOS filesystem unlocked (via remount)"
+                return 0
+            fi
+            ;;
+        rpm-ostree)
+            # rpm-ostree handles layering automatically - no unlock needed
+            log_info "rpm-ostree system - packages will be layered (reboot may be required)"
+            return 0
+            ;;
+        nixos)
+            # NixOS uses a different paradigm - suggest configuration.nix
+            log_warning "NixOS detected - add packages to configuration.nix instead"
+            log_info "Example: environment.systemPackages = with pkgs; [ nmap hashcat ];"
+            return 1
+            ;;
+        readonly)
+            log_info "Attempting to remount root as read-write..."
+            if mount -o remount,rw / 2>/dev/null; then
+                log_success "Filesystem unlocked"
+                return 0
+            else
+                log_error "Failed to remount root filesystem as read-write"
+                return 1
+            fi
+            ;;
+        *)
+            log_warning "Unknown immutable system type: $IMMUTABLE_TYPE"
+            return 1
+            ;;
+    esac
+}
+
+# Lock immutable filesystem back to read-only (for safety)
+# Returns 0 on success, 1 on failure
+lock_immutable_filesystem() {
+    [[ $IS_IMMUTABLE -eq 0 ]] && return 0
+
+    case "$IMMUTABLE_TYPE" in
+        steamos)
+            log_info "Re-locking SteamOS filesystem..."
+            if command -v steamos-readonly &>/dev/null; then
+                steamos-readonly enable 2>/dev/null || true
+                log_success "SteamOS filesystem locked"
+            fi
+            return 0
+            ;;
+        chimeraos)
+            log_info "Re-locking ChimeraOS filesystem..."
+            mount -o remount,ro / 2>/dev/null || true
+            log_success "ChimeraOS filesystem locked"
+            return 0
+            ;;
+        rpm-ostree|nixos)
+            # No action needed
+            return 0
+            ;;
+        readonly)
+            log_info "Re-locking filesystem..."
+            mount -o remount,ro / 2>/dev/null || true
+            return 0
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
+
+# Check if we can install packages on this system
+# Returns 0 if package installation is possible, 1 if not
+can_install_packages() {
+    if [[ $IS_IMMUTABLE -eq 1 ]]; then
+        case "$IMMUTABLE_TYPE" in
+            rpm-ostree)
+                # Always can layer packages via rpm-ostree
+                return 0
+                ;;
+            steamos|chimeraos)
+                # Need to check if filesystem is unlocked
+                if mount | grep -q "^/dev/.* / .*\brw\b"; then
+                    return 0
+                fi
+                log_warning "Filesystem is read-only - unlock required"
+                return 1
+                ;;
+            nixos)
+                # NixOS requires editing configuration.nix
+                log_warning "NixOS requires adding packages to configuration.nix"
+                return 1
+                ;;
+            *)
+                return 1
+                ;;
+        esac
+    fi
+    return 0
+}
+
+# Suggest alternative installation methods for immutable systems
+suggest_alternatives() {
+    [[ $IS_IMMUTABLE -eq 0 ]] && return 0
+
+    echo
+    log_info "Alternative installation methods for immutable systems:"
+    echo
+
+    case "$IMMUTABLE_TYPE" in
+        rpm-ostree)
+            echo "  1. Layer packages via rpm-ostree (persists across updates):"
+            echo "     ${C_CYAN}rpm-ostree install aircrack-ng nmap hashcat${C_RESET}"
+            echo "     ${C_CYAN}systemctl reboot${C_RESET}"
+            echo
+            ;;
+        steamos|chimeraos)
+            echo "  1. Unlock filesystem temporarily:"
+            echo "     ${C_CYAN}sudo steamos-readonly disable${C_RESET}"
+            echo "     ${C_GRAY}# Install packages, then re-lock:${C_RESET}"
+            echo "     ${C_CYAN}sudo steamos-readonly enable${C_RESET}"
+            echo
+            ;;
+    esac
+
+    echo "  2. Use Distrobox (recommended - isolated container):"
+    echo "     ${C_CYAN}distrobox create --name pentest --image kalilinux/kali-rolling${C_RESET}"
+    echo "     ${C_CYAN}distrobox enter pentest${C_RESET}"
+    echo "     ${C_GRAY}# Then install VOIDWAVE inside the container${C_RESET}"
+    echo
+
+    if command -v toolbox &>/dev/null; then
+        echo "  3. Use Toolbox:"
+        echo "     ${C_CYAN}toolbox create voidwave${C_RESET}"
+        echo "     ${C_CYAN}toolbox enter voidwave${C_RESET}"
+        echo
+    fi
+
+    echo "  4. Install to ~/.local (persists across system updates):"
+    echo "     ${C_CYAN}pip3 install --user theHarvester${C_RESET}"
+    echo "     ${C_CYAN}cargo install --root ~/.local rustscan${C_RESET}"
+    echo
+
+    if command -v flatpak &>/dev/null; then
+        echo "  5. Use Flatpak for GUI tools:"
+        echo "     ${C_CYAN}flatpak install flathub org.wireshark.Wireshark${C_RESET}"
+        echo
+    fi
 }
 
 # Detect distro family
@@ -1099,13 +1314,13 @@ detect_system() {
     DISTRO_FAMILY=$(detect_distro_family "$DISTRO")
     setup_package_manager
 
-    # Detect special environments
-    detect_immutable_system
-    detect_wsl
-    detect_container
+    # Detect special environments (these functions return 1 when not detected, so we use || true)
+    detect_immutable_system || true
+    detect_wsl || true
+    detect_container || true
 
     local extra_info=""
-    [[ $IS_IMMUTABLE -eq 1 ]] && extra_info+=" [IMMUTABLE]"
+    [[ $IS_IMMUTABLE -eq 1 ]] && extra_info+=" [IMMUTABLE:${IMMUTABLE_TYPE:-unknown}]"
     [[ $IS_STEAMDECK -eq 1 ]] && extra_info+=" [STEAMDECK]"
     [[ $IS_WSL -eq 1 ]] && extra_info+=" [WSL]"
     [[ $IS_CONTAINER -eq 1 ]] && extra_info+=" [CONTAINER]"
@@ -1122,6 +1337,9 @@ export -f detect_distro detect_distro_family
 
 # Special environment detection
 export -f detect_immutable_system detect_wsl detect_container can_system_install
+
+# Immutable system helpers
+export -f unlock_immutable_filesystem lock_immutable_filesystem can_install_packages suggest_alternatives
 
 # Package manager
 export -f detect_package_manager setup_package_manager
@@ -1149,4 +1367,4 @@ export -f detect_system
 # Export variables
 export DISTRO DISTRO_FAMILY
 export PKG_MANAGER PKG_INSTALL PKG_UPDATE PKG_SEARCH PKG_REMOVE
-export IS_IMMUTABLE IS_WSL IS_CONTAINER IS_STEAMDECK
+export IS_IMMUTABLE IMMUTABLE_TYPE IS_WSL IS_CONTAINER IS_STEAMDECK

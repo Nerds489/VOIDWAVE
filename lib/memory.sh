@@ -271,21 +271,22 @@ _memory_show_selection() {
         displays+=("$value ${C_SHADOW:-}($age)${C_RESET:-}")
     done < <(memory_get "$type" 10)
 
-    echo ""
-    echo -e "    ${C_CYAN:-}${prompt}${C_RESET:-}"
-    echo ""
-    echo -e "    ${C_SHADOW:-}Recent:${C_RESET:-}"
+    # NOTE: All prompts go to stderr so they display even when stdout is captured
+    echo "" >&2
+    echo -e "    ${C_CYAN:-}${prompt}${C_RESET:-}" >&2
+    echo "" >&2
+    echo -e "    ${C_SHADOW:-}Recent:${C_RESET:-}" >&2
 
     local i
     for i in "${!displays[@]}"; do
-        echo -e "    ${C_GHOST:-}[$((i+1))]${C_RESET:-} ${displays[$i]}"
+        echo -e "    ${C_GHOST:-}[$((i+1))]${C_RESET:-} ${displays[$i]}" >&2
     done
 
-    echo ""
-    echo -e "    ${C_GHOST:-}[S]${C_RESET:-} Scan for new"
-    echo -e "    ${C_GHOST:-}[M]${C_RESET:-} Enter manually"
-    echo -e "    ${C_GHOST:-}[0]${C_RESET:-} Cancel"
-    echo ""
+    echo "" >&2
+    echo -e "    ${C_GHOST:-}[S]${C_RESET:-} Scan for new" >&2
+    echo -e "    ${C_GHOST:-}[M]${C_RESET:-} Enter manually" >&2
+    echo -e "    ${C_GHOST:-}[0]${C_RESET:-} Cancel" >&2
+    echo "" >&2
 
     local choice
     read -rp "    Select: " choice
@@ -310,7 +311,7 @@ _memory_show_selection() {
                 echo "$selected"
                 return 0
             fi
-            log_warning "Invalid selection"
+            echo -e "    ${C_RED:-}Invalid selection: '$choice'${C_RESET:-}" >&2
             return 1
             ;;
     esac
@@ -323,11 +324,12 @@ _memory_prompt_scan() {
     local scan_func="$3"
     local validator="$4"
 
-    echo ""
-    echo -e "    ${C_CYAN:-}${prompt}${C_RESET:-}"
-    echo ""
-    echo -e "    ${C_SHADOW:-}No recent ${type}s found.${C_RESET:-}"
-    echo ""
+    # All prompts go to stderr so they display even when stdout is captured
+    echo "" >&2
+    echo -e "    ${C_CYAN:-}${prompt}${C_RESET:-}" >&2
+    echo "" >&2
+    echo -e "    ${C_SHADOW:-}No recent ${type}s found.${C_RESET:-}" >&2
+    echo "" >&2
 
     local response
     read -rp "    Scan for ${type}s? [Y/n]: " response
@@ -352,14 +354,15 @@ _memory_do_scan() {
     local validator="$3"
 
     if [[ -z "$scan_func" ]] || ! type -t "$scan_func" &>/dev/null; then
-        log_error "Scan function not available: $scan_func"
+        echo -e "    ${C_RED:-}Scan function not available: $scan_func${C_RESET:-}" >&2
         _memory_manual_input "$type" "Enter $type" "$validator"
         return $?
     fi
 
-    echo ""
-    echo -e "    ${C_CYAN:-}Scanning...${C_RESET:-}"
-    echo ""
+    # All prompts go to stderr so they display even when stdout is captured
+    echo "" >&2
+    echo -e "    ${C_CYAN:-}Scanning...${C_RESET:-}" >&2
+    echo "" >&2
 
     # Run scan function - expects it to output one item per line
     local -a results=()
@@ -371,21 +374,21 @@ _memory_do_scan() {
     done < <($scan_func 2>/dev/null)
 
     if [[ ${#results[@]} -eq 0 ]]; then
-        echo -e "    ${C_YELLOW:-}No ${type}s found${C_RESET:-}"
-        echo ""
+        echo -e "    ${C_YELLOW:-}No ${type}s found${C_RESET:-}" >&2
+        echo "" >&2
         _memory_manual_input "$type" "Enter $type manually" "$validator"
         return $?
     fi
 
-    echo -e "    ${C_GREEN:-}Found ${#results[@]} ${type}(s)${C_RESET:-}"
-    echo ""
+    echo -e "    ${C_GREEN:-}Found ${#results[@]} ${type}(s):${C_RESET:-}" >&2
+    echo "" >&2
 
     # Show selection
     local i
     for i in "${!results[@]}"; do
-        echo -e "    ${C_GHOST:-}[$((i+1))]${C_RESET:-} ${results[$i]}"
+        echo -e "    ${C_GHOST:-}[$((i+1))]${C_RESET:-} ${results[$i]}" >&2
     done
-    echo ""
+    echo "" >&2
 
     local choice
     read -rp "    Select [1-${#results[@]}]: " choice
@@ -395,7 +398,7 @@ _memory_do_scan() {
         return 0
     fi
 
-    log_warning "Invalid selection"
+    echo -e "    ${C_RED:-}Invalid selection${C_RESET:-}" >&2
     return 1
 }
 
@@ -405,21 +408,21 @@ _memory_manual_input() {
     local prompt="$2"
     local validator="$3"
 
-    echo ""
+    echo "" >&2
     local input
 
     while true; do
         read -rp "    ${prompt}: " input
 
         [[ -z "$input" ]] && {
-            log_warning "Input required"
+            echo -e "    ${C_YELLOW:-}Input required${C_RESET:-}" >&2
             continue
         }
 
         # Validate if validator provided
         if [[ -n "$validator" ]] && type -t "$validator" &>/dev/null; then
             if ! $validator "$input"; then
-                log_warning "Invalid input, please try again"
+                echo -e "    ${C_YELLOW:-}Invalid input, please try again${C_RESET:-}" >&2
                 continue
             fi
         fi

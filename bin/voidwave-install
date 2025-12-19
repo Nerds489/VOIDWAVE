@@ -1315,7 +1315,14 @@ github_install() {
             local binary
             binary=$(find "$tmp_dir" -type f -executable -name "*${tool}*" 2>/dev/null | head -1)
             [[ -z "$binary" ]] && binary=$(find "$tmp_dir" -type f -executable 2>/dev/null | head -1)
-            [[ -n "$binary" ]] && install -m 755 "$binary" "/usr/local/bin/$tool"
+            if [[ -n "$binary" ]]; then
+                if [[ $USER_INSTALL_MODE -eq 1 ]]; then
+                    mkdir -p "$HOME/.local/bin"
+                    install -m 755 "$binary" "$HOME/.local/bin/$tool"
+                else
+                    install -m 755 "$binary" "/usr/local/bin/$tool"
+                fi
+            fi
             rm -rf "$tmp_dir"
             ;;
         *.zip)
@@ -1323,12 +1330,24 @@ github_install() {
             unzip -q "$tmp_file" -d "$tmp_dir" 2>/dev/null
             local binary
             binary=$(find "$tmp_dir" -type f -executable 2>/dev/null | head -1)
-            [[ -n "$binary" ]] && install -m 755 "$binary" "/usr/local/bin/$tool"
+            if [[ -n "$binary" ]]; then
+                if [[ $USER_INSTALL_MODE -eq 1 ]]; then
+                    mkdir -p "$HOME/.local/bin"
+                    install -m 755 "$binary" "$HOME/.local/bin/$tool"
+                else
+                    install -m 755 "$binary" "/usr/local/bin/$tool"
+                fi
+            fi
             rm -rf "$tmp_dir"
             ;;
         *)
             # Assume raw binary
-            install -m 755 "$tmp_file" "/usr/local/bin/$tool"
+            if [[ $USER_INSTALL_MODE -eq 1 ]]; then
+                mkdir -p "$HOME/.local/bin"
+                install -m 755 "$tmp_file" "$HOME/.local/bin/$tool"
+            else
+                install -m 755 "$tmp_file" "/usr/local/bin/$tool"
+            fi
             ;;
     esac
 
@@ -1956,15 +1975,15 @@ check_root() {
 preflight_checks() {
     _info "Running preflight checks..."
 
-    # Root check
-    check_root
-
-    # System detection
+    # System detection FIRST (needed to detect immutable systems before root check)
     if ! detect_system; then
         _fail "Could not detect supported package manager"
         _info "Supported: apt, dnf, yum, pacman, zypper, apk, emerge, xbps, nix"
         exit 1
     fi
+
+    # Root check (can use USER_INSTALL_MODE on immutable systems)
+    check_root
 
     show_system_info
 

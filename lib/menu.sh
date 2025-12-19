@@ -172,25 +172,29 @@ show_main_menu() {
         choice=$(prompt_choice 11)
 
         case "$choice" in
-            1) show_recon_menu_new ;;
-            2) show_scan_menu_new ;;
-            3) show_osint_menu_new ;;
-            4) show_wireless_menu_new ;;
-            5) show_pillage_menu ;;
-            6) show_exploit_menu_new ;;
-            7) show_creds_menu_new ;;
-            8) show_traffic_menu_new ;;
-            9) show_stress_menu_new ;;
-            10) type -t show_status_menu &>/dev/null && show_status_menu || show_tool_status_simple ;;
-            11) type -t show_settings_menu &>/dev/null && show_settings_menu || echo "Settings not loaded" ;;
+            1) show_recon_menu_new || true ;;
+            2) show_scan_menu_new || true ;;
+            3) show_osint_menu_new || true ;;
+            4) show_wireless_menu_new || true ;;
+            5) show_pillage_menu || true ;;
+            6) show_exploit_menu_new || true ;;
+            7) show_creds_menu_new || true ;;
+            8) show_traffic_menu_new || true ;;
+            9) show_stress_menu_new || true ;;
+            10) { type -t show_status_menu &>/dev/null && show_status_menu || show_tool_status_simple; } || true ;;
+            11) { type -t show_settings_menu &>/dev/null && show_settings_menu || echo "Settings not loaded"; } || true ;;
             0)
                 if confirm "Exit VOID WAVE?"; then
                     cleanup_on_exit
                     exit 0
                 fi
                 ;;
+            ""|" ")
+                # Empty input - just redraw menu
+                continue
+                ;;
             *)
-                echo -e "    ${C_RED:-}Invalid option${C_RESET:-}"
+                echo -e "    ${C_RED:-}Invalid option: '$choice'${C_RESET:-}"
                 sleep 1
                 ;;
         esac

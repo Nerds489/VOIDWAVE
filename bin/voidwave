@@ -219,8 +219,12 @@ parse_global_flags() {
             -i|--interactive)
                 if [[ -f "$VOIDWAVE_ROOT/lib/menu.sh" ]]; then
                     source "$VOIDWAVE_ROOT/lib/menu.sh"
+                    # Disable set -e for interactive menu
+                    set +e
                     run_interactive
-                    exit $?
+                    local iret=$?
+                    set -e
+                    exit $iret
                 else
                     echo "Error: Menu module not found"
                     exit 1
@@ -457,8 +461,13 @@ main() {
     if [[ $# -eq 0 ]]; then
         if [[ -f "$VOIDWAVE_ROOT/lib/menu.sh" ]]; then
             source "$VOIDWAVE_ROOT/lib/menu.sh"
+            # IMPORTANT: Disable 'set -e' for interactive menu
+            # Otherwise any failed command (like a scan finding nothing) exits the whole app
+            set +e
             menu_loop
-            exit $?
+            local menu_exit=$?
+            set -e
+            exit $menu_exit
         else
             echo "Error: Menu module not found at $VOIDWAVE_ROOT/lib/menu.sh"
             exit 1

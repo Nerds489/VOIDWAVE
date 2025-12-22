@@ -1,0 +1,582 @@
+/* VOIDWAVE Cyberpunk Theme - Textual CSS */
+
+/* ============================================
+   COLOR VARIABLES
+   ============================================ */
+
+$primary: #0ABDC6;           /* Neon Cyan */
+$secondary: #EA00D9;         /* Hot Magenta */
+$background: #091833;        /* Deep Navy */
+$surface: #1A1A2E;           /* Dark Blue-Gray */
+$success: #00FF41;           /* Matrix Green */
+$warning: #FF9A00;           /* Neon Orange */
+$error: #FF0040;             /* Coral Red */
+$text: #E0E0E0;              /* Light Gray */
+$text-muted: #808080;        /* Muted Gray */
+$border: #0ABDC6;            /* Cyan Border */
+$border-dim: #065A5F;        /* Dimmed Cyan */
+
+/* ============================================
+   GLOBAL STYLES
+   ============================================ */
+
+Screen {
+    background: $background;
+    color: $text;
+}
+
+/* ============================================
+   HEADER & FOOTER
+   ============================================ */
+
+Header {
+    background: $surface;
+    color: $secondary;
+    text-style: bold;
+    border-bottom: double $primary;
+    height: 3;
+    content-align: center middle;
+}
+
+Footer {
+    background: $surface;
+    color: $primary;
+    border-top: solid $border-dim;
+}
+
+Footer > .footer--key {
+    background: $primary 20%;
+    color: $primary;
+    text-style: bold;
+}
+
+Footer > .footer--description {
+    color: $text-muted;
+}
+
+/* ============================================
+   CONTAINERS & LAYOUTS
+   ============================================ */
+
+.main-container {
+    layout: horizontal;
+    height: 100%;
+}
+
+.sidebar {
+    width: 30;
+    border-right: solid $border-dim;
+    background: $surface;
+}
+
+.content {
+    width: 1fr;
+    padding: 1;
+}
+
+.panel {
+    border: round $border;
+    background: $surface;
+    margin: 1;
+    padding: 1;
+}
+
+.panel-title {
+    text-style: bold;
+    color: $secondary;
+    text-align: center;
+    padding-bottom: 1;
+}
+
+/* ============================================
+   NAVIGATION & MENUS
+   ============================================ */
+
+.menu-item {
+    padding: 0 2;
+    height: 3;
+    content-align: left middle;
+}
+
+.menu-item:hover {
+    background: $primary 20%;
+}
+
+.menu-item:focus {
+    background: $primary 30%;
+    border-left: tall $primary;
+}
+
+.menu-item.--selected {
+    background: $primary 40%;
+    color: $primary;
+    text-style: bold;
+}
+
+ListView {
+    background: $surface;
+    border: solid $border-dim;
+}
+
+ListView > ListItem {
+    padding: 0 2;
+}
+
+ListView > ListItem:hover {
+    background: $primary 15%;
+}
+
+ListView > ListItem.--highlight {
+    background: $primary 30%;
+}
+
+/* ============================================
+   DATA TABLES
+   ============================================ */
+
+DataTable {
+    background: $surface;
+    border: solid $border-dim;
+}
+
+DataTable > .datatable--header {
+    background: $secondary 20%;
+    color: $secondary;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: $primary 40%;
+    color: $text;
+}
+
+DataTable > .datatable--hover {
+    background: $primary 20%;
+}
+
+DataTable > .datatable--even-row {
+    background: $background;
+}
+
+DataTable > .datatable--odd-row {
+    background: $surface;
+}
+
+/* ============================================
+   TREE VIEW
+   ============================================ */
+
+Tree {
+    background: $surface;
+    padding: 1;
+}
+
+Tree > .tree--label {
+    color: $text;
+}
+
+Tree > .tree--guides {
+    color: $border-dim;
+}
+
+Tree > .tree--cursor {
+    background: $primary 30%;
+    color: $primary;
+    text-style: bold;
+}
+
+Tree > .tree--highlight {
+    background: $primary 20%;
+}
+
+/* ============================================
+   INPUT WIDGETS
+   ============================================ */
+
+Input {
+    background: $background;
+    border: solid $border-dim;
+    padding: 0 1;
+}
+
+Input:focus {
+    border: solid $primary;
+}
+
+Input.-invalid {
+    border: solid $error;
+}
+
+Input > .input--placeholder {
+    color: $text-muted;
+}
+
+Input > .input--cursor {
+    background: $primary;
+    color: $background;
+}
+
+TextArea {
+    background: $background;
+    border: solid $border-dim;
+}
+
+TextArea:focus {
+    border: solid $primary;
+}
+
+/* ============================================
+   BUTTONS
+   ============================================ */
+
+Button {
+    background: $surface;
+    color: $primary;
+    border: solid $primary;
+    min-width: 16;
+    height: 3;
+    content-align: center middle;
+}
+
+Button:hover {
+    background: $primary 30%;
+    text-style: bold;
+}
+
+Button:focus {
+    background: $primary 40%;
+    border: double $primary;
+}
+
+Button.-primary {
+    background: $primary;
+    color: $background;
+    text-style: bold;
+}
+
+Button.-primary:hover {
+    background: $primary 80%;
+}
+
+Button.-success {
+    background: $success 20%;
+    color: $success;
+    border: solid $success;
+}
+
+Button.-warning {
+    background: $warning 20%;
+    color: $warning;
+    border: solid $warning;
+}
+
+Button.-error {
+    background: $error 20%;
+    color: $error;
+    border: solid $error;
+}
+
+/* ============================================
+   PROGRESS & LOADING
+   ============================================ */
+
+ProgressBar {
+    padding: 1;
+}
+
+ProgressBar > .bar--bar {
+    color: $primary;
+    background: $surface;
+}
+
+ProgressBar > .bar--complete {
+    color: $success;
+}
+
+LoadingIndicator {
+    color: $primary;
+}
+
+/* ============================================
+   LOG & OUTPUT
+   ============================================ */
+
+RichLog {
+    background: $background;
+    border: solid $border-dim;
+    padding: 1;
+    scrollbar-background: $surface;
+    scrollbar-color: $primary;
+}
+
+Log {
+    background: $background;
+    border: solid $border-dim;
+}
+
+.log-info {
+    color: $primary;
+}
+
+.log-success {
+    color: $success;
+}
+
+.log-warning {
+    color: $warning;
+}
+
+.log-error {
+    color: $error;
+    text-style: bold;
+}
+
+.log-timestamp {
+    color: $text-muted;
+}
+
+/* ============================================
+   TABS
+   ============================================ */
+
+TabbedContent {
+    background: $surface;
+}
+
+Tabs {
+    background: $surface;
+    border-bottom: solid $border-dim;
+}
+
+Tab {
+    background: $surface;
+    color: $text-muted;
+    padding: 1 3;
+}
+
+Tab:hover {
+    background: $primary 20%;
+    color: $primary;
+}
+
+Tab.-active {
+    background: $primary 30%;
+    color: $primary;
+    text-style: bold;
+    border-bottom: tall $primary;
+}
+
+TabPane {
+    background: $background;
+    padding: 1;
+}
+
+/* ============================================
+   MODALS & DIALOGS
+   ============================================ */
+
+ModalScreen {
+    align: center middle;
+}
+
+.modal-container {
+    background: $surface;
+    border: double $secondary;
+    padding: 2;
+    width: 60;
+    height: auto;
+    max-height: 80%;
+}
+
+.modal-title {
+    text-style: bold;
+    color: $secondary;
+    text-align: center;
+    padding-bottom: 1;
+    border-bottom: solid $border-dim;
+    margin-bottom: 1;
+}
+
+/* ============================================
+   STATUS INDICATORS
+   ============================================ */
+
+.status-running {
+    color: $primary;
+}
+
+.status-success {
+    color: $success;
+}
+
+.status-warning {
+    color: $warning;
+}
+
+.status-error {
+    color: $error;
+}
+
+.status-idle {
+    color: $text-muted;
+}
+
+/* ============================================
+   SECURITY FINDINGS
+   ============================================ */
+
+.finding-critical {
+    background: $error 30%;
+    color: $error;
+    text-style: bold;
+    border-left: tall $error;
+    padding-left: 1;
+}
+
+.finding-high {
+    background: $warning 20%;
+    color: $warning;
+    border-left: tall $warning;
+    padding-left: 1;
+}
+
+.finding-medium {
+    background: #FFD700 15%;
+    color: #FFD700;
+    border-left: tall #FFD700;
+    padding-left: 1;
+}
+
+.finding-low {
+    background: $primary 15%;
+    color: $primary;
+    border-left: tall $primary;
+    padding-left: 1;
+}
+
+.finding-info {
+    background: $surface;
+    color: $text-muted;
+    border-left: tall $text-muted;
+    padding-left: 1;
+}
+
+/* ============================================
+   WIRELESS-SPECIFIC
+   ============================================ */
+
+.signal-excellent {
+    color: $success;
+}
+
+.signal-good {
+    color: #7FFF00;
+}
+
+.signal-fair {
+    color: $warning;
+}
+
+.signal-poor {
+    color: $error;
+}
+
+.encryption-open {
+    color: $error;
+    text-style: bold;
+}
+
+.encryption-wep {
+    color: $warning;
+}
+
+.encryption-wpa {
+    color: $primary;
+}
+
+.encryption-wpa2 {
+    color: $success;
+}
+
+.encryption-wpa3 {
+    color: $secondary;
+}
+
+/* ============================================
+   COMMAND PALETTE
+   ============================================ */
+
+CommandPalette {
+    background: $surface;
+    border: double $primary;
+}
+
+CommandPalette > .command-palette--highlight {
+    background: $primary 30%;
+}
+
+/* ============================================
+   TOOLTIPS
+   ============================================ */
+
+Tooltip {
+    background: $surface;
+    color: $text;
+    border: solid $border-dim;
+    padding: 1;
+}
+
+/* ============================================
+   SCROLLBARS
+   ============================================ */
+
+*::-webkit-scrollbar {
+    background: $surface;
+}
+
+*::-webkit-scrollbar-thumb {
+    background: $primary;
+}
+
+/* ============================================
+   ASCII ART BANNER
+   ============================================ */
+
+.banner {
+    color: $primary;
+    text-align: center;
+    padding: 1;
+}
+
+.banner-accent {
+    color: $secondary;
+}
+
+.version-tag {
+    color: $text-muted;
+    text-align: center;
+}
+
+/* ============================================
+   QUICK ACTIONS
+   ============================================ */
+
+.quick-actions {
+    layout: horizontal;
+    height: auto;
+    padding: 1;
+    align: center middle;
+}
+
+.quick-actions > Button {
+    margin: 0 1;
+}
+
+/* ============================================
+   SEPARATOR
+   ============================================ */
+
+.separator {
+    color: $border-dim;
+    text-align: center;
+}

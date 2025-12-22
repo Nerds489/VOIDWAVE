@@ -1,0 +1,49 @@
+# VOIDWAVE Default Configuration
+# Override in ~/.voidwave/config/config.toml
+
+[database]
+path = "~/.voidwave/data/voidwave.db"
+wal_mode = true
+busy_timeout = 5000
+
+[logging]
+level = 20  # INFO
+file_logging = true
+log_dir = "~/.voidwave/logs"
+max_file_size = 10000000
+backup_count = 5
+
+[wireless]
+monitor_interface_prefix = "wmon"
+deauth_count = 10
+deauth_delay = 0.1
+channel_hop_interval = 0.5
+handshake_timeout = 300
+
+[scanning]
+default_scan_type = "standard"
+default_ports = "1-1000"
+timing_template = 3
+max_concurrent_hosts = 10
+
+[credentials]
+default_wordlist = "/usr/share/wordlists/rockyou.txt"
+hashcat_workload = 3
+
+[safety]
+confirm_dangerous = true
+warn_public_ip = true
+require_authorization = true
+dry_run = false
+unsafe_mode = false
+
+[ui]
+theme = "cyberpunk"
+show_banner = true
+animation_speed = 1.0
+vim_bindings = true
+
+# Top-level
+output_dir = "~/.voidwave/output"
+non_interactive = false
+debug = false

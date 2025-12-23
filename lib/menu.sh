@@ -111,7 +111,8 @@ prompt_choice() {
     local max="$1"
     local choice
     # Use echo -e + read instead of read -rp to properly interpret ANSI escape codes
-    echo -en "    ${C_PURPLE:-}▶${C_RESET:-} Select [0-${max}]: "
+    # IMPORTANT: Output prompt to stderr so it's not captured by command substitution
+    echo -en "    ${C_PURPLE:-}▶${C_RESET:-} Select [0-${max}]: " >&2
     read -r choice
     # Trim whitespace from input
     choice="${choice//[[:space:]]/}"

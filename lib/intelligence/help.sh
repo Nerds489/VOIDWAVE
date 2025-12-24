@@ -649,7 +649,7 @@ declare -gA CREDS_HELP=(
 
     IDENTIFIES BY:
     • Length (32=MD5, 40=SHA1, etc.)
-    • Prefix ($2a$=bcrypt, $6$=SHA512crypt)
+    • Prefix (\$2a\$=bcrypt, \$6\$=SHA512crypt)
     • Character set
 
     TOOLS: hashid (if installed)

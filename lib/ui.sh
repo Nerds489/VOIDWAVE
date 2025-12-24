@@ -851,9 +851,12 @@ wait_for_keypress() {
 
 select_from_list() {
     local prompt="$1"
-    local -n items_ref=$2
+    local array_name="$2"
     local page_size="${3:-10}"
-    local page=0 total=${#items_ref[@]}
+    local page=0 total item_val
+
+    # Get array size safely via eval
+    eval "total=\${#${array_name}[@]}"
     local pages=$(( (total + page_size - 1) / page_size ))
 
     [[ $total -eq 0 ]] && return 1
@@ -866,7 +869,8 @@ select_from_list() {
         echo -e "\n    ${C_CYAN:-}${prompt}${C_RESET:-} (Page $((page+1))/$pages):\n"
 
         for ((i=start; i<end; i++)); do
-            printf "    %3d) %s\n" "$((i+1))" "${items_ref[$i]}"
+            eval "item_val=\"\${${array_name}[$i]}\""
+            printf "    %3d) %s\n" "$((i+1))" "$item_val"
         done
 
         echo ""
@@ -878,7 +882,7 @@ select_from_list() {
             q|Q) return 1 ;;
             *)
                 if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= total )); then
-                    echo "${items_ref[$((choice-1))]}"
+                    eval "echo \"\${${array_name}[$((choice-1))]}\""
                     return 0
                 fi
                 ;;

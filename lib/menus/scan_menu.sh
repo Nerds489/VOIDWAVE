@@ -26,6 +26,99 @@
 [[ -n "${_VOIDWAVE_SCAN_MENU_LOADED:-}" ]] && return 0
 declare -r _VOIDWAVE_SCAN_MENU_LOADED=1
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SMART SCAN MENU
+# ═══════════════════════════════════════════════════════════════════════════════
+
+show_scan_menu_smart() {
+    [[ "${VW_NON_INTERACTIVE:-0}" == "1" ]] && return 1
+
+    while true; do
+        clear_screen 2>/dev/null || clear
+        show_banner "${VERSION:-}"
+
+        echo -e "    ${C_BOLD:-}Scanning${C_RESET:-}"
+        echo ""
+        echo "    1) Quick Scan (Top 100 ports)"
+        echo "    2) Full Port Scan (1-65535)"
+        echo "    3) Service Version Detection"
+        echo "    4) OS Detection"
+        echo "    5) Vulnerability Scan"
+        echo "    6) Stealth Scan"
+        echo "    7) UDP Scan"
+        echo "    8) Custom Scan"
+        echo ""
+        echo "    0) Back"
+        echo -e "    ${C_SHADOW:-}?) Help${C_RESET:-}"
+        echo ""
+
+        local choice
+        echo -en "    ${C_PURPLE:-}▶${C_RESET:-} Select: "
+        read -r choice
+        choice="${choice//[[:space:]]/}"
+
+        # Handle help
+        if type -t handle_help_input &>/dev/null; then
+            handle_help_input "$choice" "scan" && continue
+        fi
+
+        case "$choice" in
+            1)
+                if type -t preflight &>/dev/null; then
+                    preflight "scan_quick" || { wait_for_keypress; continue; }
+                fi
+                _scan_quick
+                ;;
+            2)
+                if type -t preflight &>/dev/null; then
+                    preflight "scan_full" || { wait_for_keypress; continue; }
+                fi
+                _scan_full
+                ;;
+            3)
+                if type -t preflight &>/dev/null; then
+                    preflight "scan_version" || { wait_for_keypress; continue; }
+                fi
+                _scan_version
+                ;;
+            4)
+                if type -t preflight &>/dev/null; then
+                    preflight "scan_os" || { wait_for_keypress; continue; }
+                fi
+                _scan_os
+                ;;
+            5)
+                if type -t preflight &>/dev/null; then
+                    preflight "scan_vuln" || { wait_for_keypress; continue; }
+                fi
+                _scan_vuln
+                ;;
+            6)
+                if type -t preflight &>/dev/null; then
+                    preflight "scan_stealth" || { wait_for_keypress; continue; }
+                fi
+                _scan_stealth
+                ;;
+            7)
+                if type -t preflight &>/dev/null; then
+                    preflight "scan_udp" || { wait_for_keypress; continue; }
+                fi
+                _scan_udp
+                ;;
+            8)
+                if type -t preflight &>/dev/null; then
+                    preflight "scan_custom" || { wait_for_keypress; continue; }
+                fi
+                _scan_custom
+                ;;
+            0) return 0 ;;
+            "") continue ;;
+            *) echo -e "    ${C_RED:-}[!] Invalid option: '$choice'${C_RESET:-}"; sleep 1 ;;
+        esac
+    done
+}
+
+# Legacy function for backwards compatibility
 show_scan_menu() {
     [[ "${VW_NON_INTERACTIVE:-0}" == "1" ]] && return 1
 
@@ -240,7 +333,7 @@ _scan_custom() {
 # EXPORTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-export -f show_scan_menu
+export -f show_scan_menu show_scan_menu_smart
 export -f _get_scan_target _run_nmap
 export -f _scan_quick _scan_full _scan_version _scan_os
 export -f _scan_vuln _scan_stealth _scan_udp _scan_custom

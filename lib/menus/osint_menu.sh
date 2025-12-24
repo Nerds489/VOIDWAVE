@@ -26,6 +26,87 @@
 [[ -n "${_VOIDWAVE_OSINT_MENU_LOADED:-}" ]] && return 0
 declare -r _VOIDWAVE_OSINT_MENU_LOADED=1
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SMART OSINT MENU
+# ═══════════════════════════════════════════════════════════════════════════════
+
+show_osint_menu_smart() {
+    [[ "${VW_NON_INTERACTIVE:-0}" == "1" ]] && return 1
+
+    while true; do
+        clear_screen 2>/dev/null || clear
+        show_banner "${VERSION:-}"
+
+        echo -e "    ${C_BOLD:-}OSINT${C_RESET:-}"
+        echo ""
+        echo "    1) theHarvester"
+        echo "    2) Shodan Search"
+        echo "    3) Google Dorking"
+        echo "    4) Social Media Lookup"
+        echo "    5) IP Reputation Check"
+        echo "    6) Domain Investigation"
+        echo "    7) Full OSINT Report"
+        echo ""
+        echo "    0) Back"
+        echo -e "    ${C_SHADOW:-}?) Help${C_RESET:-}"
+        echo ""
+
+        local choice
+        echo -en "    ${C_PURPLE:-}▶${C_RESET:-} Select: "
+        read -r choice
+        choice="${choice//[[:space:]]/}"
+
+        # Handle help
+        if type -t handle_help_input &>/dev/null; then
+            handle_help_input "$choice" "osint" && continue
+        fi
+
+        case "$choice" in
+            1)
+                if type -t preflight &>/dev/null; then
+                    preflight "osint_harvester" || { wait_for_keypress; continue; }
+                fi
+                _osint_harvester
+                ;;
+            2)
+                if type -t preflight &>/dev/null; then
+                    preflight "osint_shodan" || { wait_for_keypress; continue; }
+                fi
+                _osint_shodan
+                ;;
+            3) _osint_dorks ;;
+            4)
+                if type -t preflight &>/dev/null; then
+                    preflight "osint_social" || { wait_for_keypress; continue; }
+                fi
+                _osint_social
+                ;;
+            5)
+                if type -t preflight &>/dev/null; then
+                    preflight "osint_reputation" || { wait_for_keypress; continue; }
+                fi
+                _osint_reputation
+                ;;
+            6)
+                if type -t preflight &>/dev/null; then
+                    preflight "osint_domain" || { wait_for_keypress; continue; }
+                fi
+                _osint_domain
+                ;;
+            7)
+                if type -t preflight &>/dev/null; then
+                    preflight "osint_full" || { wait_for_keypress; continue; }
+                fi
+                _osint_full
+                ;;
+            0) return 0 ;;
+            "") continue ;;
+            *) echo -e "    ${C_RED:-}[!] Invalid option: '$choice'${C_RESET:-}"; sleep 1 ;;
+        esac
+    done
+}
+
+# Legacy function for backwards compatibility
 show_osint_menu() {
     [[ "${VW_NON_INTERACTIVE:-0}" == "1" ]] && return 1
 
@@ -413,6 +494,6 @@ _osint_full() {
 # EXPORTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-export -f show_osint_menu
+export -f show_osint_menu show_osint_menu_smart
 export -f _osint_harvester _osint_shodan _osint_dorks _osint_social
 export -f _osint_reputation _osint_domain _osint_full

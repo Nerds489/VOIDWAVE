@@ -31,6 +31,96 @@ declare -r _STRESS_MAX_DURATION=300
 declare -r _STRESS_MAX_CONNECTIONS=10000
 declare -r _STRESS_MAX_RATE=100000
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SMART STRESS MENU
+# ═══════════════════════════════════════════════════════════════════════════════
+
+show_stress_menu_smart() {
+    [[ "${VW_NON_INTERACTIVE:-0}" == "1" ]] && return 1
+
+    # Entry warning every time
+    clear_screen 2>/dev/null || clear
+    echo ""
+    echo -e "    ${C_RED:-}╔══════════════════════════════════════════════════════╗${C_RESET:-}"
+    echo -e "    ${C_RED:-}║  STRESS TESTING / DoS SIMULATION                     ║${C_RESET:-}"
+    echo -e "    ${C_RED:-}║                                                       ║${C_RESET:-}"
+    echo -e "    ${C_RED:-}║  These tools can cause service disruption.           ║${C_RESET:-}"
+    echo -e "    ${C_RED:-}║  Only use against systems you OWN or have            ║${C_RESET:-}"
+    echo -e "    ${C_RED:-}║  WRITTEN AUTHORIZATION to test.                      ║${C_RESET:-}"
+    echo -e "    ${C_RED:-}║                                                       ║${C_RESET:-}"
+    echo -e "    ${C_RED:-}║  Unauthorized use is a FEDERAL CRIME.                ║${C_RESET:-}"
+    echo -e "    ${C_RED:-}╚══════════════════════════════════════════════════════╝${C_RESET:-}"
+    echo ""
+
+    confirm "I understand and have authorization" || return 1
+
+    while true; do
+        clear_screen 2>/dev/null || clear
+        show_banner "${VERSION:-}"
+
+        echo -e "    ${C_BOLD:-}${C_RED:-}Stress Testing${C_RESET:-}"
+        echo ""
+        echo "    1) HTTP Flood (slowloris)"
+        echo "    2) SYN Flood"
+        echo "    3) UDP Flood"
+        echo "    4) ICMP Flood"
+        echo "    5) Connection Test"
+        echo "    6) Bandwidth Test"
+        echo ""
+        echo "    0) Back"
+        echo -e "    ${C_SHADOW:-}?) Help${C_RESET:-}"
+        echo ""
+
+        local choice
+        echo -en "    ${C_PURPLE:-}▶${C_RESET:-} Select: "
+        read -r choice
+        choice="${choice//[[:space:]]/}"
+
+        # Handle help
+        if type -t handle_help_input &>/dev/null; then
+            handle_help_input "$choice" "stress" && continue
+        fi
+
+        case "$choice" in
+            1)
+                if type -t preflight &>/dev/null; then
+                    preflight "stress_http" || { wait_for_keypress; continue; }
+                fi
+                _stress_http
+                ;;
+            2)
+                if type -t preflight &>/dev/null; then
+                    preflight "stress_syn" || { wait_for_keypress; continue; }
+                fi
+                _stress_syn
+                ;;
+            3)
+                if type -t preflight &>/dev/null; then
+                    preflight "stress_udp" || { wait_for_keypress; continue; }
+                fi
+                _stress_udp
+                ;;
+            4)
+                if type -t preflight &>/dev/null; then
+                    preflight "stress_icmp" || { wait_for_keypress; continue; }
+                fi
+                _stress_icmp
+                ;;
+            5) _stress_conn ;;
+            6)
+                if type -t preflight &>/dev/null; then
+                    preflight "stress_bandwidth" || { wait_for_keypress; continue; }
+                fi
+                _stress_bandwidth
+                ;;
+            0) return 0 ;;
+            "") continue ;;
+            *) echo -e "    ${C_RED:-}[!] Invalid option: '$choice'${C_RESET:-}"; sleep 1 ;;
+        esac
+    done
+}
+
+# Legacy function for backwards compatibility
 show_stress_menu() {
     [[ "${VW_NON_INTERACTIVE:-0}" == "1" ]] && return 1
 
@@ -384,6 +474,6 @@ _stress_bandwidth() {
 # EXPORTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-export -f show_stress_menu _is_private_ip _validate_stress_target
+export -f show_stress_menu show_stress_menu_smart _is_private_ip _validate_stress_target
 export -f _stress_http _stress_syn _stress_udp _stress_icmp
 export -f _stress_conn _stress_bandwidth

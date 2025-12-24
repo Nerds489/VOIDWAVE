@@ -26,6 +26,85 @@
 [[ -n "${_VOIDWAVE_TRAFFIC_MENU_LOADED:-}" ]] && return 0
 declare -r _VOIDWAVE_TRAFFIC_MENU_LOADED=1
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SMART TRAFFIC MENU
+# ═══════════════════════════════════════════════════════════════════════════════
+
+show_traffic_menu_smart() {
+    [[ "${VW_NON_INTERACTIVE:-0}" == "1" ]] && return 1
+
+    while true; do
+        clear_screen 2>/dev/null || clear
+        show_banner "${VERSION:-}"
+
+        echo -e "    ${C_BOLD:-}Traffic Analysis${C_RESET:-}"
+        echo ""
+        echo "    1) Packet Capture (tcpdump)"
+        echo "    2) Wireshark (GUI)"
+        echo "    3) ARP Spoofing"
+        echo "    4) DNS Spoofing"
+        echo "    5) Network Sniffing"
+        echo "    6) PCAP Analysis"
+        echo ""
+        echo "    0) Back"
+        echo -e "    ${C_SHADOW:-}?) Help${C_RESET:-}"
+        echo ""
+
+        local choice
+        echo -en "    ${C_PURPLE:-}▶${C_RESET:-} Select: "
+        read -r choice
+        choice="${choice//[[:space:]]/}"
+
+        # Handle help
+        if type -t handle_help_input &>/dev/null; then
+            handle_help_input "$choice" "traffic" && continue
+        fi
+
+        case "$choice" in
+            1)
+                if type -t preflight &>/dev/null; then
+                    preflight "traffic_tcpdump" || { wait_for_keypress; continue; }
+                fi
+                _traffic_tcpdump
+                ;;
+            2)
+                if type -t preflight &>/dev/null; then
+                    preflight "traffic_wireshark" || { wait_for_keypress; continue; }
+                fi
+                _traffic_wireshark
+                ;;
+            3)
+                if type -t preflight &>/dev/null; then
+                    preflight "traffic_arpspoof" || { wait_for_keypress; continue; }
+                fi
+                _traffic_arpspoof
+                ;;
+            4)
+                if type -t preflight &>/dev/null; then
+                    preflight "traffic_dnsspoof" || { wait_for_keypress; continue; }
+                fi
+                _traffic_dnsspoof
+                ;;
+            5)
+                if type -t preflight &>/dev/null; then
+                    preflight "traffic_sniff" || { wait_for_keypress; continue; }
+                fi
+                _traffic_sniff
+                ;;
+            6)
+                if type -t preflight &>/dev/null; then
+                    preflight "traffic_pcap" || { wait_for_keypress; continue; }
+                fi
+                _traffic_pcap
+                ;;
+            0) return 0 ;;
+            "") continue ;;
+            *) echo -e "    ${C_RED:-}[!] Invalid option: '$choice'${C_RESET:-}"; sleep 1 ;;
+        esac
+    done
+}
+
+# Legacy function for backwards compatibility
 show_traffic_menu() {
     [[ "${VW_NON_INTERACTIVE:-0}" == "1" ]] && return 1
 
@@ -399,6 +478,6 @@ _traffic_pcap() {
 # EXPORTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-export -f show_traffic_menu
+export -f show_traffic_menu show_traffic_menu_smart
 export -f _traffic_tcpdump _traffic_wireshark _traffic_arpspoof
 export -f _traffic_dnsspoof _traffic_sniff _traffic_pcap

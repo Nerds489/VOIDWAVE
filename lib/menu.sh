@@ -27,6 +27,11 @@ done
 # Source wireless loader for new attack functions
 [[ -f "${VOIDWAVE_ROOT}/lib/wireless_loader.sh" ]] && source "${VOIDWAVE_ROOT}/lib/wireless_loader.sh"
 
+# Source intelligence modules for help and preflight
+[[ -f "${VOIDWAVE_ROOT}/lib/intelligence/help.sh" ]] && source "${VOIDWAVE_ROOT}/lib/intelligence/help.sh"
+[[ -f "${VOIDWAVE_ROOT}/lib/intelligence/preflight.sh" ]] && source "${VOIDWAVE_ROOT}/lib/intelligence/preflight.sh"
+[[ -f "${VOIDWAVE_ROOT}/lib/intelligence/targeting.sh" ]] && source "${VOIDWAVE_ROOT}/lib/intelligence/targeting.sh"
+
 # Track state for cleanup
 declare -g _MENU_ACTIVE=0
 declare -g _CURRENT_IFACE=""
@@ -177,15 +182,15 @@ show_main_menu() {
         choice=$(prompt_choice 11)
 
         case "$choice" in
-            1) show_recon_menu_new || true ;;
-            2) show_scan_menu_new || true ;;
-            3) show_osint_menu_new || true ;;
-            4) show_wireless_menu_new || true ;;
+            1) { type -t show_recon_menu_smart &>/dev/null && show_recon_menu_smart || show_recon_menu_new; } || true ;;
+            2) { type -t show_scan_menu_smart &>/dev/null && show_scan_menu_smart || show_scan_menu_new; } || true ;;
+            3) { type -t show_osint_menu_smart &>/dev/null && show_osint_menu_smart || show_osint_menu_new; } || true ;;
+            4) wireless_load_all 2>/dev/null; show_wireless_menu_smart || true ;;
             5) show_pillage_menu || true ;;
-            6) show_exploit_menu_new || true ;;
-            7) show_creds_menu_new || true ;;
-            8) show_traffic_menu_new || true ;;
-            9) show_stress_menu_new || true ;;
+            6) { type -t show_exploit_menu_smart &>/dev/null && show_exploit_menu_smart || show_exploit_menu_new; } || true ;;
+            7) { type -t show_creds_menu_smart &>/dev/null && show_creds_menu_smart || show_creds_menu_new; } || true ;;
+            8) { type -t show_traffic_menu_smart &>/dev/null && show_traffic_menu_smart || show_traffic_menu_new; } || true ;;
+            9) { type -t show_stress_menu_smart &>/dev/null && show_stress_menu_smart || show_stress_menu_new; } || true ;;
             10) { type -t show_status_menu &>/dev/null && show_status_menu || show_tool_status_simple; } || true ;;
             11) { type -t show_settings_menu &>/dev/null && show_settings_menu || echo "Settings not loaded"; } || true ;;
             0)

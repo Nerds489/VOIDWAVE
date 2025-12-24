@@ -26,6 +26,70 @@
 [[ -n "${_VOIDWAVE_CREDS_MENU_LOADED:-}" ]] && return 0
 declare -r _VOIDWAVE_CREDS_MENU_LOADED=1
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SMART CREDS MENU
+# ═══════════════════════════════════════════════════════════════════════════════
+
+show_creds_menu_smart() {
+    [[ "${VW_NON_INTERACTIVE:-0}" == "1" ]] && return 1
+
+    while true; do
+        clear_screen 2>/dev/null || clear
+        show_banner "${VERSION:-}"
+
+        echo -e "    ${C_BOLD:-}Credential Attacks${C_RESET:-}"
+        echo ""
+        echo "    1) Hydra Brute Force"
+        echo "    2) Hashcat Cracking"
+        echo "    3) John the Ripper"
+        echo "    4) Hash Identifier"
+        echo "    5) Password List Generator"
+        echo "    6) Extract Hashes from File"
+        echo ""
+        echo "    0) Back"
+        echo -e "    ${C_SHADOW:-}?) Help${C_RESET:-}"
+        echo ""
+
+        local choice
+        echo -en "    ${C_PURPLE:-}▶${C_RESET:-} Select: "
+        read -r choice
+        choice="${choice//[[:space:]]/}"
+
+        # Handle help
+        if type -t handle_help_input &>/dev/null; then
+            handle_help_input "$choice" "creds" && continue
+        fi
+
+        case "$choice" in
+            1)
+                if type -t preflight &>/dev/null; then
+                    preflight "creds_hydra" || { wait_for_keypress; continue; }
+                fi
+                _creds_hydra
+                ;;
+            2)
+                if type -t preflight &>/dev/null; then
+                    preflight "creds_hashcat" || { wait_for_keypress; continue; }
+                fi
+                _creds_hashcat
+                ;;
+            3)
+                if type -t preflight &>/dev/null; then
+                    preflight "creds_john" || { wait_for_keypress; continue; }
+                fi
+                _creds_john
+                ;;
+            4) _creds_identify ;;
+            5) _creds_wordlist ;;
+            6) _creds_extract ;;
+            0) return 0 ;;
+            "") continue ;;
+            *) echo -e "    ${C_RED:-}[!] Invalid option: '$choice'${C_RESET:-}"; sleep 1 ;;
+        esac
+    done
+}
+
+# Legacy function for backwards compatibility
 show_creds_menu() {
     [[ "${VW_NON_INTERACTIVE:-0}" == "1" ]] && return 1
 
@@ -425,6 +489,6 @@ _creds_extract() {
 # EXPORTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-export -f show_creds_menu _get_default_port
+export -f show_creds_menu show_creds_menu_smart _get_default_port
 export -f _creds_hydra _creds_hashcat _creds_john
 export -f _creds_identify _creds_wordlist _creds_extract

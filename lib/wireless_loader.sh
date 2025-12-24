@@ -26,6 +26,10 @@ fi
 
 # Core wireless infrastructure
 _wireless_core_modules=(
+    "intelligence/help.sh"
+    "intelligence/preflight.sh"
+    "intelligence/targeting.sh"
+    "intelligence/wireless_menu_smart.sh"
     "wireless/config.sh"
     "wireless/adapter.sh"
     "wireless/deps.sh"

@@ -26,6 +26,85 @@
 [[ -n "${_VOIDWAVE_RECON_MENU_LOADED:-}" ]] && return 0
 declare -r _VOIDWAVE_RECON_MENU_LOADED=1
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SMART RECON MENU
+# ═══════════════════════════════════════════════════════════════════════════════
+
+show_recon_menu_smart() {
+    [[ "${VW_NON_INTERACTIVE:-0}" == "1" ]] && return 1
+
+    while true; do
+        clear_screen 2>/dev/null || clear
+        show_banner "${VERSION:-}"
+
+        echo -e "    ${C_BOLD:-}Reconnaissance${C_RESET:-}"
+        echo ""
+        echo "    1) DNS Enumeration"
+        echo "    2) Subdomain Discovery"
+        echo "    3) WHOIS Lookup"
+        echo "    4) Email Harvesting"
+        echo "    5) Technology Detection"
+        echo "    6) Full Recon Suite"
+        echo ""
+        echo "    0) Back"
+        echo -e "    ${C_SHADOW:-}?) Help${C_RESET:-}"
+        echo ""
+
+        local choice
+        echo -en "    ${C_PURPLE:-}▶${C_RESET:-} Select: "
+        read -r choice
+        choice="${choice//[[:space:]]/}"
+
+        # Handle help
+        if type -t handle_help_input &>/dev/null; then
+            handle_help_input "$choice" "recon" && continue
+        fi
+
+        case "$choice" in
+            1)
+                if type -t preflight &>/dev/null; then
+                    preflight "recon_dns" || { wait_for_keypress; continue; }
+                fi
+                _recon_dns
+                ;;
+            2)
+                if type -t preflight &>/dev/null; then
+                    preflight "recon_subdomain" || { wait_for_keypress; continue; }
+                fi
+                _recon_subdomains
+                ;;
+            3)
+                if type -t preflight &>/dev/null; then
+                    preflight "recon_whois" || { wait_for_keypress; continue; }
+                fi
+                _recon_whois
+                ;;
+            4)
+                if type -t preflight &>/dev/null; then
+                    preflight "recon_email" || { wait_for_keypress; continue; }
+                fi
+                _recon_emails
+                ;;
+            5)
+                if type -t preflight &>/dev/null; then
+                    preflight "recon_tech" || { wait_for_keypress; continue; }
+                fi
+                _recon_tech
+                ;;
+            6)
+                if type -t preflight &>/dev/null; then
+                    preflight "recon_full" || { wait_for_keypress; continue; }
+                fi
+                _recon_full
+                ;;
+            0) return 0 ;;
+            "") continue ;;
+            *) echo -e "    ${C_RED:-}[!] Invalid option: '$choice'${C_RESET:-}"; sleep 1 ;;
+        esac
+    done
+}
+
+# Legacy function for backwards compatibility
 show_recon_menu() {
     [[ "${VW_NON_INTERACTIVE:-0}" == "1" ]] && return 1
 
@@ -232,5 +311,5 @@ _recon_full() {
 # EXPORTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-export -f show_recon_menu
+export -f show_recon_menu show_recon_menu_smart
 export -f _recon_dns _recon_subdomains _recon_whois _recon_emails _recon_tech _recon_full

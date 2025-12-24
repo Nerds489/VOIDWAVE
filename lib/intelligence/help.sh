@@ -1128,27 +1128,31 @@ declare -gA SETTINGS_HELP=(
 show_option_help() {
     local menu="$1"
     local option="$2"
-    local -n help_array="${menu^^}_HELP"
-    
-    local help_text="${help_array[$option]:-}"
-    
+    local array_name="${menu^^}_HELP"
+    local help_text=""
+
+    # Use eval to safely access associative array by name
+    if declare -p "$array_name" &>/dev/null; then
+        eval "help_text=\"\${${array_name}[$option]:-}\""
+    fi
+
     clear_screen 2>/dev/null || clear
     echo ""
-    echo -e "    ${C_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
-    echo -e "    ${C_WHITE}HELP: Option $option${C_RESET}"
-    echo -e "    ${C_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
+    echo -e "    ${C_CYAN:-}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET:-}"
+    echo -e "    ${C_WHITE:-}HELP: Option $option${C_RESET:-}"
+    echo -e "    ${C_CYAN:-}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET:-}"
     echo ""
-    
+
     if [[ -n "$help_text" ]]; then
         echo "$help_text" | sed 's/^/    /'
     else
-        echo -e "    ${C_SHADOW}No help available for option $option${C_RESET}"
+        echo -e "    ${C_SHADOW:-}No help available for option $option${C_RESET:-}"
     fi
-    
+
     echo ""
-    echo -e "    ${C_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
+    echo -e "    ${C_CYAN:-}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET:-}"
     echo ""
-    echo -e "    ${C_SHADOW}Press Enter to return...${C_RESET}"
+    echo -e "    ${C_SHADOW:-}Press Enter to return...${C_RESET:-}"
     read -r
 }
 
@@ -1156,40 +1160,52 @@ show_option_help() {
 # Args: $1 = menu name
 show_menu_help() {
     local menu="$1"
-    local -n help_array="${menu^^}_HELP"
-    
+    local array_name="${menu^^}_HELP"
+
+    # Check if array exists
+    if ! declare -p "$array_name" &>/dev/null; then
+        echo -e "    ${C_RED:-}No help available for ${menu} menu${C_RESET:-}"
+        sleep 1
+        return 1
+    fi
+
     clear_screen 2>/dev/null || clear
     echo ""
-    echo -e "    ${C_PURPLE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
-    echo -e "    ${C_WHITE}${menu^^} MENU - HELP & DESCRIPTIONS${C_RESET}"
-    echo -e "    ${C_PURPLE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
+    echo -e "    ${C_PURPLE:-}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET:-}"
+    echo -e "    ${C_WHITE:-}${menu^^} MENU - HELP & DESCRIPTIONS${C_RESET:-}"
+    echo -e "    ${C_PURPLE:-}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET:-}"
     echo ""
-    echo -e "    ${C_SHADOW}Enter option number to see detailed help, or 0 to return${C_RESET}"
+    echo -e "    ${C_SHADOW:-}Enter option number to see detailed help, or 0 to return${C_RESET:-}"
     echo ""
-    
+
     # List all available options with first line of description
-    for key in $(echo "${!help_array[@]}" | tr ' ' '\n' | sort -n); do
-        local first_line
-        first_line=$(echo "${help_array[$key]}" | head -1 | xargs)
-        printf "    ${C_CYAN}%3s${C_RESET}) %s\n" "$key" "$first_line"
+    local keys
+    eval "keys=\"\${!${array_name}[@]}\""
+    for key in $(echo "$keys" | tr ' ' '\n' | sort -n); do
+        local first_line help_val
+        eval "help_val=\"\${${array_name}[$key]}\""
+        first_line=$(echo "$help_val" | head -1 | xargs)
+        printf "    ${C_CYAN:-}%3s${C_RESET:-}) %s\n" "$key" "$first_line"
     done
-    
+
     echo ""
-    echo -e "    ${C_SHADOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
+    echo -e "    ${C_SHADOW:-}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET:-}"
     echo ""
-    
+
     while true; do
-        echo -en "    ${C_PURPLE}?${C_RESET} Help for option [0=back]: "
+        echo -en "    ${C_PURPLE:-}?${C_RESET:-} Help for option [0=back]: "
         read -r choice
-        
+
         [[ "$choice" == "0" || "$choice" == "q" || -z "$choice" ]] && return 0
-        
-        if [[ -n "${help_array[$choice]:-}" ]]; then
+
+        local check_val=""
+        eval "check_val=\"\${${array_name}[$choice]:-}\""
+        if [[ -n "$check_val" ]]; then
             show_option_help "$menu" "$choice"
             show_menu_help "$menu"  # Redisplay help menu
             return 0
         else
-            echo -e "    ${C_RED}No help for option $choice${C_RESET}"
+            echo -e "    ${C_RED:-}No help for option $choice${C_RESET:-}"
         fi
     done
 }

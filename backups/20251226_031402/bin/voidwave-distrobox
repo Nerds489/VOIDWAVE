@@ -1,0 +1,506 @@
+#!/usr/bin/env bash
+#═══════════════════════════════════════════════════════════════════════════════
+#
+#    VOIDWAVE DISTROBOX HELPER v10.0.0
+#    Manage VOIDWAVE containers for immutable systems
+#
+#    Copyright (c) 2025 Nerds489
+#    Licensed under the Apache License, Version 2.0
+#
+#    For systems like Bazzite, SteamOS, Fedora Silverblue, etc.
+#    This script creates and manages a containerized pentesting environment
+#    that persists across system updates.
+#
+#═══════════════════════════════════════════════════════════════════════════════
+
+set -euo pipefail
+
+# Configuration
+CONTAINER_NAME="${VOIDWAVE_CONTAINER_NAME:-voidwave-box}"
+DEFAULT_IMAGE="${VOIDWAVE_DEFAULT_IMAGE:-kalilinux/kali-rolling}"
+
+# Colors
+if [[ -t 1 ]] && [[ "${NO_COLOR:-}" != "1" ]]; then
+    C_RESET='\033[0m'
+    C_RED='\033[0;31m'
+    C_GREEN='\033[0;32m'
+    C_YELLOW='\033[0;33m'
+    C_CYAN='\033[0;36m'
+    C_BOLD='\033[1m'
+else
+    C_RESET='' C_RED='' C_GREEN='' C_YELLOW='' C_CYAN='' C_BOLD=''
+fi
+
+# Output helpers
+log_info()    { echo -e "${C_CYAN}[INFO]${C_RESET} $*"; }
+log_ok()      { echo -e "${C_GREEN}[OK]${C_RESET}   $*"; }
+log_warn()    { echo -e "${C_YELLOW}[WARN]${C_RESET} $*"; }
+log_error()   { echo -e "${C_RED}[ERROR]${C_RESET} $*" >&2; }
+
+# Detect the host distribution
+detect_host_distro() {
+    if [[ -f /etc/os-release ]]; then
+        source /etc/os-release
+        echo "${ID:-unknown}"
+    else
+        echo "unknown"
+    fi
+}
+
+# Check if distrobox is available
+check_distrobox() {
+    if ! command -v distrobox &>/dev/null; then
+        log_error "Distrobox is not installed"
+        echo
+        local distro
+        distro=$(detect_host_distro)
+
+        echo "Install distrobox for your system:"
+        echo
+        case "$distro" in
+            bazzite|fedora|silverblue|kinoite)
+                echo "  ${C_CYAN}# For Bazzite/Fedora Atomic (ujust method):${C_RESET}"
+                echo "  ujust install-distrobox"
+                echo
+                echo "  ${C_CYAN}# Or via rpm-ostree:${C_RESET}"
+                echo "  rpm-ostree install distrobox && systemctl reboot"
+                ;;
+            steamos)
+                echo "  ${C_CYAN}# On Steam Deck, distrobox should be pre-installed.${C_RESET}"
+                echo "  ${C_CYAN}# If not, try the official installer:${C_RESET}"
+                echo "  curl -s https://raw.githubusercontent.com/89luca89/distrobox/main/install | sh -s -- --prefix ~/.local"
+                ;;
+            arch|manjaro|endeavouros)
+                echo "  ${C_CYAN}# Arch-based:${C_RESET}"
+                echo "  sudo pacman -S distrobox podman"
+                ;;
+            ubuntu|debian|pop|linuxmint)
+                echo "  ${C_CYAN}# Debian/Ubuntu-based:${C_RESET}"
+                echo "  sudo apt install distrobox podman"
+                ;;
+            *)
+                echo "  ${C_CYAN}# Universal installer (works everywhere):${C_RESET}"
+                echo "  curl -s https://raw.githubusercontent.com/89luca89/distrobox/main/install | sh -s -- --prefix ~/.local"
+                ;;
+        esac
+        echo
+        echo "After installing, make sure ~/.local/bin is in your PATH"
+        echo
+        exit 1
+    fi
+}
+
+# Check if podman or docker is available
+check_container_runtime() {
+    if ! command -v podman &>/dev/null && ! command -v docker &>/dev/null; then
+        log_error "No container runtime found (podman or docker required)"
+        echo
+        echo "Install a container runtime:"
+        echo
+        echo "  ${C_CYAN}# Podman (recommended for rootless):${C_RESET}"
+        echo "  # Fedora/rpm-ostree: rpm-ostree install podman"
+        echo "  # Arch: pacman -S podman"
+        echo "  # Ubuntu/Debian: apt install podman"
+        echo
+        exit 1
+    fi
+}
+
+# Check if container exists
+container_exists() {
+    distrobox list 2>/dev/null | grep -q "^${CONTAINER_NAME} "
+}
+
+# Show banner
+show_banner() {
+    echo -e "${C_CYAN}"
+    cat << 'BANNER'
+╔═══════════════════════════════════════════════════════════════╗
+║           VOIDWAVE DISTROBOX HELPER                           ║
+║           Containerized Pentesting for Immutable Systems      ║
+╚═══════════════════════════════════════════════════════════════╝
+BANNER
+    echo -e "${C_RESET}"
+}
+
+# Create the container
+cmd_create() {
+    local image="${1:-$DEFAULT_IMAGE}"
+
+    check_distrobox
+    check_container_runtime
+
+    if container_exists; then
+        log_warn "Container '$CONTAINER_NAME' already exists"
+        echo "Use 'voidwave-distrobox enter' to enter it"
+        echo "Or 'voidwave-distrobox remove' to remove it first"
+        return 1
+    fi
+
+    log_info "Creating container '$CONTAINER_NAME' with image '$image'..."
+
+    # Create the container with additional capabilities for network tools
+    distrobox create \
+        --name "$CONTAINER_NAME" \
+        --image "$image" \
+        --additional-flags "--cap-add=NET_ADMIN --cap-add=NET_RAW" \
+        --yes
+
+    log_ok "Container created successfully!"
+    echo
+    echo "Next steps:"
+    echo "  ${C_CYAN}voidwave-distrobox enter${C_RESET}    # Enter the container"
+    echo "  ${C_CYAN}voidwave-distrobox setup${C_RESET}    # Install VOIDWAVE tools"
+}
+
+# Enter the container
+cmd_enter() {
+    check_distrobox
+
+    if ! container_exists; then
+        log_error "Container '$CONTAINER_NAME' does not exist"
+        echo "Create it first with: voidwave-distrobox create"
+        return 1
+    fi
+
+    log_info "Entering container '$CONTAINER_NAME'..."
+    distrobox enter "$CONTAINER_NAME"
+}
+
+# Install VOIDWAVE tools inside the container
+cmd_setup() {
+    check_distrobox
+
+    if ! container_exists; then
+        log_error "Container '$CONTAINER_NAME' does not exist"
+        echo "Create it first with: voidwave-distrobox create"
+        return 1
+    fi
+
+    log_info "Setting up VOIDWAVE tools in container..."
+
+    # Determine package manager based on image
+    local setup_script='
+        set -e
+
+        # Update package lists
+        if command -v apt-get &>/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y aircrack-ng nmap hashcat john hydra nikto gobuster \
+                tcpdump wireshark tshark reaver bully mdk4 hcxdumptool hcxtools \
+                python3-pip git curl wget
+        elif command -v pacman &>/dev/null; then
+            sudo pacman -Sy --noconfirm
+            sudo pacman -S --noconfirm --needed aircrack-ng nmap hashcat john hydra nikto \
+                gobuster tcpdump wireshark-cli reaver bully mdk4 hcxdumptool hcxtools \
+                python-pip git curl wget
+        elif command -v dnf &>/dev/null; then
+            sudo dnf install -y aircrack-ng nmap hashcat john hydra nikto \
+                tcpdump wireshark-cli python3-pip git curl wget
+        else
+            echo "Unknown package manager - please install tools manually"
+            exit 1
+        fi
+
+        echo
+        echo "Basic tools installed. For more tools, run inside the container:"
+        echo "  sudo apt install metasploit-framework  # Kali/Parrot"
+        echo "  pip3 install --user theHarvester shodan"
+    '
+
+    distrobox enter "$CONTAINER_NAME" -- bash -c "$setup_script"
+
+    log_ok "Setup complete!"
+}
+
+# Remove the container
+cmd_remove() {
+    check_distrobox
+
+    if ! container_exists; then
+        log_warn "Container '$CONTAINER_NAME' does not exist"
+        return 0
+    fi
+
+    echo -ne "${C_YELLOW}Remove container '$CONTAINER_NAME'? [y/N]${C_RESET} "
+    read -r response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        log_info "Cancelled"
+        return 0
+    fi
+
+    log_info "Removing container '$CONTAINER_NAME'..."
+    distrobox rm "$CONTAINER_NAME" --force
+
+    log_ok "Container removed"
+}
+
+# Stop the container
+cmd_stop() {
+    check_distrobox
+
+    if ! container_exists; then
+        log_warn "Container '$CONTAINER_NAME' does not exist"
+        return 0
+    fi
+
+    log_info "Stopping container '$CONTAINER_NAME'..."
+    distrobox stop "$CONTAINER_NAME" --yes
+
+    log_ok "Container stopped"
+}
+
+# Show container status
+cmd_status() {
+    check_distrobox
+
+    echo
+    echo -e "${C_BOLD}Container: ${C_CYAN}$CONTAINER_NAME${C_RESET}"
+    echo
+
+    if container_exists; then
+        # Get container info
+        local info
+        info=$(distrobox list 2>/dev/null | grep "^${CONTAINER_NAME} " || true)
+
+        if [[ -n "$info" ]]; then
+            echo -e "  ${C_GREEN}Status:${C_RESET} Exists"
+
+            # Check if running
+            if podman ps 2>/dev/null | grep -q "$CONTAINER_NAME" || \
+               docker ps 2>/dev/null | grep -q "$CONTAINER_NAME"; then
+                echo -e "  ${C_GREEN}Running:${C_RESET} Yes"
+            else
+                echo -e "  ${C_YELLOW}Running:${C_RESET} No"
+            fi
+
+            # Show image
+            local image
+            image=$(echo "$info" | awk '{print $2}')
+            echo -e "  ${C_CYAN}Image:${C_RESET} $image"
+        fi
+    else
+        echo -e "  ${C_RED}Status:${C_RESET} Not created"
+        echo
+        echo "Create with: voidwave-distrobox create"
+    fi
+
+    echo
+}
+
+# Diagnose environment and report issues
+cmd_doctor() {
+    show_banner
+    echo -e "${C_BOLD}VOIDWAVE Distrobox Environment Check${C_RESET}"
+    echo
+    local issues=0
+    local distro
+    distro=$(detect_host_distro)
+
+    echo -e "${C_BOLD}System:${C_RESET}"
+    echo -e "  Distribution: ${C_CYAN}$distro${C_RESET}"
+
+    # Check if immutable
+    local immutable="No"
+    if [[ -d /ostree ]] || command -v rpm-ostree &>/dev/null; then
+        immutable="Yes (ostree-based)"
+    elif [[ "$distro" == "steamos" || "$distro" == "bazzite" ]]; then
+        immutable="Yes"
+    fi
+    echo -e "  Immutable system: ${C_CYAN}$immutable${C_RESET}"
+    echo
+
+    echo -e "${C_BOLD}Dependencies:${C_RESET}"
+
+    # Check distrobox
+    if command -v distrobox &>/dev/null; then
+        local dbver
+        dbver=$(distrobox version 2>/dev/null | head -1 || echo "unknown")
+        echo -e "  ${C_GREEN}[OK]${C_RESET} distrobox: $dbver"
+    else
+        echo -e "  ${C_RED}[MISSING]${C_RESET} distrobox"
+        issues=$((issues + 1))
+    fi
+
+    # Check container runtime
+    if command -v podman &>/dev/null; then
+        local podver
+        podver=$(podman --version 2>/dev/null | head -1 || echo "unknown")
+        echo -e "  ${C_GREEN}[OK]${C_RESET} podman: $podver"
+    elif command -v docker &>/dev/null; then
+        local dockver
+        dockver=$(docker --version 2>/dev/null | head -1 || echo "unknown")
+        echo -e "  ${C_GREEN}[OK]${C_RESET} docker: $dockver"
+    else
+        echo -e "  ${C_RED}[MISSING]${C_RESET} container runtime (podman or docker)"
+        issues=$((issues + 1))
+    fi
+
+    echo
+
+    echo -e "${C_BOLD}Container Status:${C_RESET}"
+    if command -v distrobox &>/dev/null; then
+        if container_exists; then
+            echo -e "  ${C_GREEN}[OK]${C_RESET} Container '$CONTAINER_NAME' exists"
+
+            # Check if running
+            if podman ps 2>/dev/null | grep -q "$CONTAINER_NAME" || \
+               docker ps 2>/dev/null | grep -q "$CONTAINER_NAME"; then
+                echo -e "  ${C_GREEN}[OK]${C_RESET} Container is running"
+            else
+                echo -e "  ${C_YELLOW}[INFO]${C_RESET} Container is stopped (will start on enter)"
+            fi
+        else
+            echo -e "  ${C_YELLOW}[INFO]${C_RESET} Container '$CONTAINER_NAME' not created yet"
+            echo -e "        Run: ${C_CYAN}voidwave-distrobox create${C_RESET}"
+        fi
+    else
+        echo -e "  ${C_YELLOW}[SKIP]${C_RESET} Cannot check (distrobox not installed)"
+    fi
+
+    echo
+
+    # Summary
+    if [[ $issues -eq 0 ]]; then
+        echo -e "${C_GREEN}All checks passed!${C_RESET}"
+        echo
+        if ! container_exists 2>/dev/null; then
+            echo "Ready to create your container:"
+            echo "  ${C_CYAN}voidwave-distrobox create${C_RESET}"
+        fi
+    else
+        echo -e "${C_RED}Found $issues issue(s) that need attention.${C_RESET}"
+        echo
+        echo "Fix the issues above, then run this check again:"
+        echo "  ${C_CYAN}voidwave-distrobox doctor${C_RESET}"
+    fi
+    echo
+}
+
+# Export a command from the container to the host
+cmd_export() {
+    local app="${1:-}"
+
+    if [[ -z "$app" ]]; then
+        log_error "Usage: voidwave-distrobox export <application>"
+        echo
+        echo "Export an application from the container to your host."
+        echo "This creates a wrapper in ~/.local/bin that runs the app in the container."
+        echo
+        echo "Examples:"
+        echo "  voidwave-distrobox export nmap"
+        echo "  voidwave-distrobox export hashcat"
+        return 1
+    fi
+
+    check_distrobox
+
+    if ! container_exists; then
+        log_error "Container '$CONTAINER_NAME' does not exist"
+        return 1
+    fi
+
+    log_info "Exporting '$app' from container..."
+    distrobox enter "$CONTAINER_NAME" -- distrobox-export --app "$app" 2>/dev/null || \
+    distrobox enter "$CONTAINER_NAME" -- distrobox-export --bin "/usr/bin/$app" --export-path ~/.local/bin
+
+    log_ok "Exported '$app' to ~/.local/bin/"
+    echo "Make sure ~/.local/bin is in your PATH"
+}
+
+# Show help
+show_help() {
+    show_banner
+
+    cat << EOF
+${C_BOLD}USAGE:${C_RESET}
+    voidwave-distrobox <command> [options]
+
+${C_BOLD}COMMANDS:${C_RESET}
+    create [image]    Create the VOIDWAVE container
+                      Default image: $DEFAULT_IMAGE
+    enter             Enter the container shell
+    setup             Install VOIDWAVE tools in the container
+    stop              Stop the running container
+    remove            Remove the container
+    status            Show container status
+    export <app>      Export an app from container to host
+    doctor            Check environment and diagnose issues
+    help              Show this help
+
+${C_BOLD}ENVIRONMENT VARIABLES:${C_RESET}
+    VOIDWAVE_CONTAINER_NAME    Container name (default: voidwave-box)
+    VOIDWAVE_DEFAULT_IMAGE     Default image (default: kalilinux/kali-rolling)
+
+${C_BOLD}ALTERNATIVE IMAGES:${C_RESET}
+    kalilinux/kali-rolling     Kali Linux (recommended for pentesting)
+    archlinux                  Arch Linux (BlackArch repos available)
+    parrotsec/security         Parrot Security
+    docker.io/library/debian   Debian (lightweight)
+
+${C_BOLD}EXAMPLES:${C_RESET}
+    # Quick start
+    voidwave-distrobox create
+    voidwave-distrobox setup
+    voidwave-distrobox enter
+
+    # Use a different image
+    voidwave-distrobox create archlinux
+
+    # Export nmap to use from host
+    voidwave-distrobox export nmap
+    nmap --version  # Works from host now!
+
+${C_BOLD}WHY USE THIS?${C_RESET}
+    On immutable systems (Bazzite, SteamOS, Silverblue), system packages
+    are reset on updates. Distrobox provides a persistent container where
+    you can install pentesting tools that survive system updates.
+
+    The container has full access to your home directory and network,
+    making it seamless to use for security testing.
+
+EOF
+}
+
+# Main
+main() {
+    case "${1:-help}" in
+        create)
+            show_banner
+            cmd_create "${2:-}"
+            ;;
+        enter)
+            cmd_enter
+            ;;
+        setup)
+            show_banner
+            cmd_setup
+            ;;
+        stop)
+            cmd_stop
+            ;;
+        remove|rm|delete)
+            cmd_remove
+            ;;
+        status)
+            show_banner
+            cmd_status
+            ;;
+        export)
+            cmd_export "${2:-}"
+            ;;
+        doctor|check|diagnose)
+            cmd_doctor
+            ;;
+        help|--help|-h)
+            show_help
+            ;;
+        *)
+            log_error "Unknown command: $1"
+            echo "Run 'voidwave-distrobox help' for usage"
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

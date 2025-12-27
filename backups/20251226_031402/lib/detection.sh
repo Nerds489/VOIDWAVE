@@ -1,0 +1,1370 @@
+#!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════════════════════════════
+# VOIDWAVE - Offensive Security Framework
+# ═══════════════════════════════════════════════════════════════════════════════
+# Copyright (c) 2025 Nerds489
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# See LICENSE and NOTICE files in the project root for full details.
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Detection library: system, distro, package manager, tools, network interfaces
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Prevent multiple sourcing
+[[ -n "${_VOIDWAVE_DETECTION_LOADED:-}" ]] && return 0
+readonly _VOIDWAVE_DETECTION_LOADED=1
+
+# Source core library
+source "${BASH_SOURCE%/*}/core.sh"
+
+#═══════════════════════════════════════════════════════════════════════════════
+# WIRELESS DETECTION (single source of truth)
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Check if interface is wireless (supports monitor mode)
+# Args: $1 = interface name
+# Returns: 0 if wireless, 1 if not
+is_wireless_interface() {
+    local iface="${1:-}"
+    [[ -z "$iface" ]] && return 1
+
+    # sysfs (most reliable if present)
+    [[ -d "/sys/class/net/$iface/wireless" ]] && return 0
+
+    # iw (modern)
+    if command -v iw &>/dev/null; then
+        iw dev "$iface" info &>/dev/null 2>&1 && return 0
+    fi
+
+    # /proc/net/wireless (older, but common; note leading whitespace)
+    if [[ -r /proc/net/wireless ]]; then
+        grep -q "^[[:space:]]*${iface}:" /proc/net/wireless 2>/dev/null && return 0
+    fi
+
+    return 1
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# GLOBAL VARIABLES (set by detect_system)
+#═══════════════════════════════════════════════════════════════════════════════
+
+declare -g DISTRO=""
+declare -g DISTRO_FAMILY=""
+declare -g PKG_MANAGER=""
+declare -g PKG_INSTALL=""
+declare -g PKG_UPDATE=""
+declare -g PKG_SEARCH=""
+declare -g PKG_REMOVE=""
+
+# Special system flags
+declare -g IS_IMMUTABLE=0      # Immutable root filesystem (SteamOS, Silverblue, etc.)
+declare -g IMMUTABLE_TYPE=""   # Type of immutable system: rpm-ostree, steamos, chimeraos, nixos, ostree
+declare -g IS_WSL=0            # Windows Subsystem for Linux
+declare -g IS_CONTAINER=0      # Running in Docker/Podman/LXC
+declare -g IS_STEAMDECK=0      # Steam Deck specifically
+
+#═══════════════════════════════════════════════════════════════════════════════
+# DISTRIBUTION DETECTION
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Detect Linux distribution
+# NOTE: We parse instead of source to avoid VERSION variable conflicts with /etc/os-release
+# Returns: distro name (debian, fedora, arch, etc.) or "unknown"
+detect_distro() {
+    local distro=""
+
+    if [[ -f /etc/os-release ]]; then
+        # Parse instead of source to avoid variable conflicts (VERSION, etc.)
+        # Use sed instead of grep -oP for Alpine/BusyBox compatibility
+        distro=$(sed -n 's/^ID=//p' /etc/os-release | tr -d '"')
+    elif [[ -f /etc/lsb-release ]]; then
+        distro=$(sed -n 's/^DISTRIB_ID=//p' /etc/lsb-release | tr -d '"' | tr '[:upper:]' '[:lower:]')
+    elif [[ -f /etc/debian_version ]]; then
+        distro="debian"
+    elif [[ -f /etc/fedora-release ]]; then
+        distro="fedora"
+    elif [[ -f /etc/centos-release ]]; then
+        distro="centos"
+    elif [[ -f /etc/arch-release ]]; then
+        distro="arch"
+    elif [[ -f /etc/gentoo-release ]]; then
+        distro="gentoo"
+    elif [[ -f /etc/alpine-release ]]; then
+        distro="alpine"
+    fi
+
+    echo "${distro:-unknown}"
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# SPECIAL ENVIRONMENT DETECTION
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Detect if running on an immutable/atomic Linux distribution
+# Sets IS_IMMUTABLE=1 if true, and IMMUTABLE_TYPE to the specific type
+# Immutable distros: SteamOS, Fedora Silverblue/Kinoite, VanillaOS, Bazzite, etc.
+detect_immutable_system() {
+    IS_IMMUTABLE=0
+    IS_STEAMDECK=0
+    IMMUTABLE_TYPE=""
+
+    # Method 1: Check for SteamOS specifically
+    if [[ -f /etc/os-release ]]; then
+        local os_id os_variant
+        os_id=$(sed -n 's/^ID=//p' /etc/os-release | tr -d '"')
+        os_variant=$(sed -n 's/^VARIANT_ID=//p' /etc/os-release | tr -d '"')
+
+        # SteamOS 3.x (Steam Deck)
+        if [[ "$os_id" == "steamos" ]]; then
+            IS_IMMUTABLE=1
+            IS_STEAMDECK=1
+            IMMUTABLE_TYPE="steamos"
+            return 0
+        fi
+
+        # Bazzite (Steam Deck alternative / Universal Blue)
+        if [[ "$os_id" == "bazzite" ]]; then
+            IS_IMMUTABLE=1
+            IS_STEAMDECK=1
+            IMMUTABLE_TYPE="rpm-ostree"
+            return 0
+        fi
+
+        # ChimeraOS (another Steam Deck-like distro)
+        if [[ "$os_id" == "chimeraos" ]]; then
+            IS_IMMUTABLE=1
+            IMMUTABLE_TYPE="chimeraos"
+            return 0
+        fi
+
+        # Universal Blue variants (Bluefin, Aurora, etc.)
+        case "$os_id" in
+            bluefin|aurora|ublue-os)
+                IS_IMMUTABLE=1
+                IMMUTABLE_TYPE="rpm-ostree"
+                return 0
+                ;;
+        esac
+    fi
+
+    # Method 2: Check for rpm-ostree based systems (Silverblue, Kinoite, etc.)
+    if command -v rpm-ostree &>/dev/null; then
+        IS_IMMUTABLE=1
+        IMMUTABLE_TYPE="rpm-ostree"
+        return 0
+    fi
+
+    # Method 3: Check for ostree deployments
+    if [[ -d /ostree ]] || [[ -d /sysroot/ostree ]]; then
+        IS_IMMUTABLE=1
+        IMMUTABLE_TYPE="ostree"
+        return 0
+    fi
+
+    # Method 4: Check for read-only root filesystem
+    if [[ -f /etc/os-release ]]; then
+        local os_id
+        os_id=$(sed -n 's/^ID=//p' /etc/os-release | tr -d '"')
+
+        # VanillaOS, blendOS
+        case "$os_id" in
+            vanilla|blendos|carbonos)
+                IS_IMMUTABLE=1
+                IMMUTABLE_TYPE="apx"
+                return 0
+                ;;
+        esac
+    fi
+
+    # Method 5: Check for NixOS (also immutable in a sense)
+    if [[ -f /etc/NIXOS ]] || [[ -d /nix/store ]]; then
+        IS_IMMUTABLE=1
+        IMMUTABLE_TYPE="nixos"
+        return 0
+    fi
+
+    # Method 6: Check if root is actually read-only mounted
+    if grep -q " / .*\bro\b" /proc/mounts 2>/dev/null; then
+        IS_IMMUTABLE=1
+        IMMUTABLE_TYPE="readonly"
+        return 0
+    fi
+
+    return 1
+}
+
+# Detect if running in WSL (Windows Subsystem for Linux)
+detect_wsl() {
+    IS_WSL=0
+
+    # Method 1: Check /proc/version for Microsoft/WSL
+    if [[ -f /proc/version ]]; then
+        if grep -qiE "(microsoft|wsl)" /proc/version 2>/dev/null; then
+            IS_WSL=1
+            return 0
+        fi
+    fi
+
+    # Method 2: Check for WSL-specific files
+    if [[ -f /proc/sys/fs/binfmt_misc/WSLInterop ]]; then
+        IS_WSL=1
+        return 0
+    fi
+
+    # Method 3: Check WSL environment variable
+    if [[ -n "${WSL_DISTRO_NAME:-}" ]] || [[ -n "${WSL_INTEROP:-}" ]]; then
+        IS_WSL=1
+        return 0
+    fi
+
+    return 1
+}
+
+# Detect if running in a container (Docker, Podman, LXC)
+detect_container() {
+    IS_CONTAINER=0
+
+    # Method 1: Check for /.dockerenv
+    if [[ -f /.dockerenv ]]; then
+        IS_CONTAINER=1
+        return 0
+    fi
+
+    # Method 2: Check cgroup for container indicators
+    if [[ -f /proc/1/cgroup ]]; then
+        if grep -qE "(docker|lxc|kubepods|libpod)" /proc/1/cgroup 2>/dev/null; then
+            IS_CONTAINER=1
+            return 0
+        fi
+    fi
+
+    # Method 3: Check for container environment variable
+    if [[ -n "${container:-}" ]]; then
+        IS_CONTAINER=1
+        return 0
+    fi
+
+    # Method 4: Check for podman
+    if [[ -f /run/.containerenv ]]; then
+        IS_CONTAINER=1
+        return 0
+    fi
+
+    return 1
+}
+
+# Check if system path is writable (for install decisions)
+# Returns 0 if system install is possible, 1 if user-only install
+can_system_install() {
+    # Immutable systems should use user install
+    if [[ $IS_IMMUTABLE -eq 1 ]]; then
+        return 1
+    fi
+
+    # Check if we're root and /opt or /usr/local is writable
+    if [[ $EUID -eq 0 ]]; then
+        if [[ -w "/opt" ]] || [[ -w "/usr/local/bin" ]]; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# IMMUTABLE SYSTEM HELPERS
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Unlock immutable filesystem for package installation
+# Returns 0 on success, 1 on failure
+# Note: This is primarily for SteamOS/ChimeraOS; rpm-ostree systems don't need unlocking
+unlock_immutable_filesystem() {
+    [[ $IS_IMMUTABLE -eq 0 ]] && return 0
+
+    case "$IMMUTABLE_TYPE" in
+        steamos)
+            log_info "Unlocking SteamOS filesystem..."
+            if command -v steamos-readonly &>/dev/null; then
+                if ! steamos-readonly disable 2>/dev/null; then
+                    log_error "Failed to unlock SteamOS filesystem"
+                    log_info "Try manually: sudo steamos-readonly disable"
+                    return 1
+                fi
+                # Initialize pacman keyring if needed
+                if [[ ! -d /etc/pacman.d/gnupg ]] || [[ ! -f /etc/pacman.d/gnupg/pubring.gpg ]]; then
+                    log_info "Initializing pacman keyring..."
+                    pacman-key --init 2>/dev/null || true
+                    pacman-key --populate archlinux 2>/dev/null || true
+                fi
+                log_success "SteamOS filesystem unlocked"
+                return 0
+            else
+                log_error "steamos-readonly command not found"
+                return 1
+            fi
+            ;;
+        chimeraos)
+            log_info "Unlocking ChimeraOS filesystem..."
+            if command -v frzr-unlock &>/dev/null; then
+                if ! frzr-unlock 2>/dev/null; then
+                    # Fallback: try direct remount
+                    mount -o remount,rw / 2>/dev/null || {
+                        log_error "Failed to unlock ChimeraOS filesystem"
+                        return 1
+                    }
+                fi
+                log_success "ChimeraOS filesystem unlocked"
+                return 0
+            else
+                # Fallback method
+                mount -o remount,rw / 2>/dev/null || {
+                    log_error "Failed to unlock ChimeraOS filesystem"
+                    return 1
+                }
+                log_success "ChimeraOS filesystem unlocked (via remount)"
+                return 0
+            fi
+            ;;
+        rpm-ostree)
+            # rpm-ostree handles layering automatically - no unlock needed
+            log_info "rpm-ostree system - packages will be layered (reboot may be required)"
+            return 0
+            ;;
+        nixos)
+            # NixOS uses a different paradigm - suggest configuration.nix
+            log_warning "NixOS detected - add packages to configuration.nix instead"
+            log_info "Example: environment.systemPackages = with pkgs; [ nmap hashcat ];"
+            return 1
+            ;;
+        readonly)
+            log_info "Attempting to remount root as read-write..."
+            if mount -o remount,rw / 2>/dev/null; then
+                log_success "Filesystem unlocked"
+                return 0
+            else
+                log_error "Failed to remount root filesystem as read-write"
+                return 1
+            fi
+            ;;
+        *)
+            log_warning "Unknown immutable system type: $IMMUTABLE_TYPE"
+            return 1
+            ;;
+    esac
+}
+
+# Lock immutable filesystem back to read-only (for safety)
+# Returns 0 on success, 1 on failure
+lock_immutable_filesystem() {
+    [[ $IS_IMMUTABLE -eq 0 ]] && return 0
+
+    case "$IMMUTABLE_TYPE" in
+        steamos)
+            log_info "Re-locking SteamOS filesystem..."
+            if command -v steamos-readonly &>/dev/null; then
+                steamos-readonly enable 2>/dev/null || true
+                log_success "SteamOS filesystem locked"
+            fi
+            return 0
+            ;;
+        chimeraos)
+            log_info "Re-locking ChimeraOS filesystem..."
+            mount -o remount,ro / 2>/dev/null || true
+            log_success "ChimeraOS filesystem locked"
+            return 0
+            ;;
+        rpm-ostree|nixos)
+            # No action needed
+            return 0
+            ;;
+        readonly)
+            log_info "Re-locking filesystem..."
+            mount -o remount,ro / 2>/dev/null || true
+            return 0
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
+
+# Check if we can install packages on this system
+# Returns 0 if package installation is possible, 1 if not
+can_install_packages() {
+    if [[ $IS_IMMUTABLE -eq 1 ]]; then
+        case "$IMMUTABLE_TYPE" in
+            rpm-ostree)
+                # Always can layer packages via rpm-ostree
+                return 0
+                ;;
+            steamos|chimeraos)
+                # Need to check if filesystem is unlocked
+                if mount | grep -q "^/dev/.* / .*\brw\b"; then
+                    return 0
+                fi
+                log_warning "Filesystem is read-only - unlock required"
+                return 1
+                ;;
+            nixos)
+                # NixOS requires editing configuration.nix
+                log_warning "NixOS requires adding packages to configuration.nix"
+                return 1
+                ;;
+            *)
+                return 1
+                ;;
+        esac
+    fi
+    return 0
+}
+
+# Suggest alternative installation methods for immutable systems
+suggest_alternatives() {
+    [[ $IS_IMMUTABLE -eq 0 ]] && return 0
+
+    echo
+    log_info "Alternative installation methods for immutable systems:"
+    echo
+
+    case "$IMMUTABLE_TYPE" in
+        rpm-ostree)
+            echo "  1. Layer packages via rpm-ostree (persists across updates):"
+            echo "     ${C_CYAN}rpm-ostree install aircrack-ng nmap hashcat${C_RESET}"
+            echo "     ${C_CYAN}systemctl reboot${C_RESET}"
+            echo
+            ;;
+        steamos|chimeraos)
+            echo "  1. Unlock filesystem temporarily:"
+            echo "     ${C_CYAN}sudo steamos-readonly disable${C_RESET}"
+            echo "     ${C_GRAY}# Install packages, then re-lock:${C_RESET}"
+            echo "     ${C_CYAN}sudo steamos-readonly enable${C_RESET}"
+            echo
+            ;;
+    esac
+
+    echo "  2. Use Distrobox (recommended - isolated container):"
+    echo "     ${C_CYAN}distrobox create --name pentest --image kalilinux/kali-rolling${C_RESET}"
+    echo "     ${C_CYAN}distrobox enter pentest${C_RESET}"
+    echo "     ${C_GRAY}# Then install VOIDWAVE inside the container${C_RESET}"
+    echo
+
+    if command -v toolbox &>/dev/null; then
+        echo "  3. Use Toolbox:"
+        echo "     ${C_CYAN}toolbox create voidwave${C_RESET}"
+        echo "     ${C_CYAN}toolbox enter voidwave${C_RESET}"
+        echo
+    fi
+
+    echo "  4. Install to ~/.local (persists across system updates):"
+    echo "     ${C_CYAN}pip3 install --user theHarvester${C_RESET}"
+    echo "     ${C_CYAN}cargo install --root ~/.local rustscan${C_RESET}"
+    echo
+
+    if command -v flatpak &>/dev/null; then
+        echo "  5. Use Flatpak for GUI tools:"
+        echo "     ${C_CYAN}flatpak install flathub org.wireshark.Wireshark${C_RESET}"
+        echo
+    fi
+}
+
+# Detect distro family
+# Args: $1 = distro name
+# Returns: family name (debian, redhat, arch, etc.)
+detect_distro_family() {
+    local distro="${1:-$(detect_distro)}"
+
+    case "$distro" in
+        # Debian family
+        debian|ubuntu|kali|parrot|linuxmint|pop|elementary|zorin|mx|raspbian|devuan|deepin|pureos)
+            echo "debian"
+            ;;
+        # Red Hat family (including immutable variants)
+        fedora|rhel|centos|rocky|alma|oracle|amazon|nobara|ultramarine|silverblue|kinoite|sericea|onyx)
+            echo "redhat"
+            ;;
+        # Arch family (including SteamOS which is Arch-based)
+        arch|manjaro|endeavouros|blackarch|arcolinux|garuda|artix|cachyos|steamos|bazzite|chimeraos)
+            echo "arch"
+            ;;
+        # SUSE family
+        opensuse*|suse|sles|opensuse-leap|opensuse-tumbleweed|opensuse-microos|aeon|kalpa)
+            echo "suse"
+            ;;
+        # Alpine family
+        alpine|postmarketos)
+            echo "alpine"
+            ;;
+        # Gentoo family
+        gentoo|funtoo|calculate)
+            echo "gentoo"
+            ;;
+        # Void Linux
+        void)
+            echo "void"
+            ;;
+        # NixOS family
+        nixos)
+            echo "nix"
+            ;;
+        # Solus
+        solus)
+            echo "solus"
+            ;;
+        # VanillaOS and similar (uses apt but immutable)
+        vanilla|blendos)
+            echo "debian"
+            ;;
+        # ChromeOS/Crostini (Debian-based container)
+        chromeos|cros)
+            echo "debian"
+            ;;
+        *)
+            # Try to determine family from ID_LIKE in os-release
+            if [[ -f /etc/os-release ]]; then
+                local id_like
+                id_like=$(sed -n 's/^ID_LIKE=//p' /etc/os-release | tr -d '"')
+                case "$id_like" in
+                    *debian*|*ubuntu*)   echo "debian"; return ;;
+                    *rhel*|*fedora*)     echo "redhat"; return ;;
+                    *arch*)              echo "arch"; return ;;
+                    *suse*)              echo "suse"; return ;;
+                esac
+            fi
+            echo "unknown"
+            ;;
+    esac
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# PACKAGE MANAGER DETECTION
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Detect and return package manager name
+# Returns: apt, dnf, pacman, etc. or "unknown"
+detect_package_manager() {
+    if command -v apt-get &>/dev/null; then
+        echo "apt"
+    elif command -v dnf &>/dev/null; then
+        echo "dnf"
+    elif command -v yum &>/dev/null; then
+        echo "yum"
+    elif command -v pacman &>/dev/null; then
+        echo "pacman"
+    elif command -v zypper &>/dev/null; then
+        echo "zypper"
+    elif command -v apk &>/dev/null; then
+        echo "apk"
+    elif command -v emerge &>/dev/null; then
+        echo "emerge"
+    elif command -v xbps-install &>/dev/null; then
+        echo "xbps"
+    else
+        echo "unknown"
+    fi
+}
+
+# Setup package manager variables based on detected manager
+# Sets: PKG_MANAGER, PKG_INSTALL, PKG_UPDATE, PKG_SEARCH, PKG_REMOVE
+setup_package_manager() {
+    PKG_MANAGER=$(detect_package_manager)
+
+    case "$PKG_MANAGER" in
+        apt)
+            PKG_INSTALL="apt-get install -y"
+            PKG_UPDATE="apt-get update"
+            PKG_SEARCH="apt-cache search"
+            PKG_REMOVE="apt-get remove -y"
+            ;;
+        dnf)
+            PKG_INSTALL="dnf install -y"
+            PKG_UPDATE="dnf check-update"
+            PKG_SEARCH="dnf search"
+            PKG_REMOVE="dnf remove -y"
+            ;;
+        yum)
+            PKG_INSTALL="yum install -y"
+            PKG_UPDATE="yum check-update"
+            PKG_SEARCH="yum search"
+            PKG_REMOVE="yum remove -y"
+            ;;
+        pacman)
+            PKG_INSTALL="pacman -S --noconfirm"
+            PKG_UPDATE="pacman -Sy"
+            PKG_SEARCH="pacman -Ss"
+            PKG_REMOVE="pacman -R --noconfirm"
+            ;;
+        zypper)
+            PKG_INSTALL="zypper install -y"
+            PKG_UPDATE="zypper refresh"
+            PKG_SEARCH="zypper search"
+            PKG_REMOVE="zypper remove -y"
+            ;;
+        apk)
+            PKG_INSTALL="apk add"
+            PKG_UPDATE="apk update"
+            PKG_SEARCH="apk search"
+            PKG_REMOVE="apk del"
+            ;;
+        emerge)
+            PKG_INSTALL="emerge"
+            PKG_UPDATE="emerge --sync"
+            PKG_SEARCH="emerge --search"
+            PKG_REMOVE="emerge --unmerge"
+            ;;
+        xbps)
+            PKG_INSTALL="xbps-install -y"
+            PKG_UPDATE="xbps-install -S"
+            PKG_SEARCH="xbps-query -Rs"
+            PKG_REMOVE="xbps-remove -y"
+            ;;
+        *)
+            PKG_INSTALL=""
+            PKG_UPDATE=""
+            PKG_SEARCH=""
+            PKG_REMOVE=""
+            return 1
+            ;;
+    esac
+
+    return 0
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# TOOL REGISTRY
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Tool to package name mapping
+# Maps logical tool name to OS package name for installation
+declare -gA TOOL_PACKAGES=(
+    [nmap]="nmap"
+    [masscan]="masscan"
+    [nikto]="nikto"
+    [hydra]="hydra"
+    [john]="john"
+    [hashcat]="hashcat"
+    [aircrack-ng]="aircrack-ng"
+    [airodump-ng]="aircrack-ng"
+    [aireplay-ng]="aircrack-ng"
+    [hping3]="hping3"
+    [tcpdump]="tcpdump"
+    [tshark]="tshark"
+    [whois]="whois"
+    [dig]="dnsutils"
+    [curl]="curl"
+    [jq]="jq"
+    [gobuster]="gobuster"
+    [netcat]="netcat"
+    [nc]="netcat"
+    [sqlmap]="sqlmap"
+    [wfuzz]="wfuzz"
+    [dirb]="dirb"
+    [sslscan]="sslscan"
+    [enum4linux]="enum4linux"
+    [nbtscan]="nbtscan"
+    [arp-scan]="arp-scan"
+    [iw]="iw"
+    [iwconfig]="wireless-tools"
+    [macchanger]="macchanger"
+    [reaver]="reaver"
+    [bully]="bully"
+    [wifite]="wifite"
+    [mdk4]="mdk4"
+    [hostapd]="hostapd"
+    [dnsmasq]="dnsmasq"
+)
+
+# Tool categories for organized status display
+# Maps category name to space-separated list of tools
+declare -gA TOOL_CATEGORIES=(
+    [recon]="nmap masscan whois dig arp-scan nbtscan"
+    [wireless]="aircrack-ng airodump-ng aireplay-ng iw iwconfig macchanger reaver bully wifite mdk4"
+    [scanning]="nmap nikto gobuster dirb sslscan"
+    [credentials]="hydra john hashcat"
+    [traffic]="tcpdump tshark"
+    [stress]="hping3 mdk4"
+    [web]="nikto gobuster sqlmap wfuzz dirb curl"
+    [enumeration]="enum4linux nbtscan whois"
+    [network]="hostapd dnsmasq netcat"
+    [utilities]="curl jq"
+)
+
+#═══════════════════════════════════════════════════════════════════════════════
+# DISTRO-AWARE PACKAGE NAME MAPPING
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Get the correct package name for the current distro family
+# Args: $1 = tool name (binary name)
+# Returns: package name to install for this distro
+# Uses DISTRO_FAMILY (set by detect_system) to determine correct package
+tool_package_name() {
+    local tool="$1"
+    local family="${DISTRO_FAMILY:-unknown}"
+
+    # Handle empty input
+    [[ -z "$tool" ]] && { echo "$tool"; return 1; }
+
+    # Suite tools - all distros map to parent package
+    case "$tool" in
+        airodump-ng|aireplay-ng|airmon-ng|airbase-ng|airdecap-ng|airdecloak-ng|airserv-ng|airtun-ng|besside-ng|easside-ng|packetforge-ng|tkiptun-ng|wesside-ng)
+            echo "aircrack-ng"
+            return 0
+            ;;
+    esac
+
+    # Distro-family specific mappings
+    case "$tool" in
+        # DNS utilities
+        dig|nslookup|host)
+            case "$family" in
+                debian)  echo "dnsutils" ;;
+                redhat)  echo "bind-utils" ;;
+                arch)    echo "bind" ;;
+                suse)    echo "bind-utils" ;;
+                alpine)  echo "bind-tools" ;;
+                *)       echo "dnsutils" ;;
+            esac
+            return 0
+            ;;
+
+        # Wireshark/tshark
+        tshark)
+            case "$family" in
+                debian)  echo "tshark" ;;
+                redhat)  echo "wireshark-cli" ;;
+                arch)    echo "wireshark-cli" ;;
+                suse)    echo "wireshark" ;;
+                alpine)  echo "tshark" ;;
+                *)       echo "tshark" ;;
+            esac
+            return 0
+            ;;
+
+        wireshark)
+            case "$family" in
+                arch)    echo "wireshark-qt" ;;
+                *)       echo "wireshark" ;;
+            esac
+            return 0
+            ;;
+
+        # Netcat variants
+        netcat|nc)
+            case "$family" in
+                debian)  echo "netcat-openbsd" ;;
+                redhat)  echo "nmap-ncat" ;;
+                arch)    echo "openbsd-netcat" ;;
+                suse)    echo "netcat-openbsd" ;;
+                alpine)  echo "netcat-openbsd" ;;
+                *)       echo "netcat" ;;
+            esac
+            return 0
+            ;;
+
+        # Python pip
+        pip3|pip)
+            case "$family" in
+                debian)  echo "python3-pip" ;;
+                redhat)  echo "python3-pip" ;;
+                arch)    echo "python-pip" ;;
+                suse)    echo "python3-pip" ;;
+                alpine)  echo "py3-pip" ;;
+                *)       echo "python3-pip" ;;
+            esac
+            return 0
+            ;;
+
+        # Wireless tools
+        iwconfig|iwlist)
+            echo "wireless-tools"
+            return 0
+            ;;
+
+        # John the Ripper
+        john)
+            case "$family" in
+                debian)  echo "john" ;;
+                redhat)  echo "john" ;;
+                arch)    echo "john" ;;
+                *)       echo "john" ;;
+            esac
+            return 0
+            ;;
+
+        # Whois
+        whois)
+            case "$family" in
+                alpine)  echo "whois" ;;
+                *)       echo "whois" ;;
+            esac
+            return 0
+            ;;
+
+        # Traceroute
+        traceroute)
+            case "$family" in
+                debian)  echo "traceroute" ;;
+                redhat)  echo "traceroute" ;;
+                arch)    echo "traceroute" ;;
+                alpine)  echo "busybox-extras" ;;
+                *)       echo "traceroute" ;;
+            esac
+            return 0
+            ;;
+    esac
+
+    # Check if tool is in TOOL_PACKAGES registry
+    if [[ -n "${TOOL_PACKAGES[$tool]:-}" ]]; then
+        echo "${TOOL_PACKAGES[$tool]}"
+        return 0
+    fi
+
+    # Default: package name same as tool name
+    echo "$tool"
+    return 0
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# TOOL DETECTION
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Comprehensive list of binary directories to search
+# Includes all common locations where tools might be installed
+readonly TOOL_SEARCH_PATHS=(
+    "/usr/bin"
+    "/usr/local/bin"
+    "/usr/sbin"
+    "/usr/local/sbin"
+    "/sbin"
+    "/bin"
+    "/opt/bin"
+    "$HOME/.local/bin"
+    "$HOME/go/bin"
+)
+
+# Check if a tool/command is installed
+# Args: $1 = tool name, $2 = silent flag (1 = no log output)
+# Returns: 0 if installed, 1 if not
+# Falls back to common binary directories if command -v fails
+check_tool() {
+    local tool="$1"
+    local silent="${2:-0}"
+    local tool_path=""
+
+    # Reject empty tool name
+    [[ -z "$tool" ]] && return 1
+
+    # First try command -v (checks PATH)
+    if tool_path=$(command -v "$tool" 2>/dev/null); then
+        [[ "$silent" != "1" ]] && log_success "$tool: $tool_path"
+        return 0
+    fi
+
+    # Fallback: check comprehensive list of binary directories
+    for dir in "${TOOL_SEARCH_PATHS[@]}"; do
+        if [[ -x "${dir}/${tool}" ]]; then
+            tool_path="${dir}/${tool}"
+            [[ "$silent" != "1" ]] && log_success "$tool: $tool_path"
+            return 0
+        fi
+    done
+
+    # Not found
+    [[ "$silent" != "1" ]] && log_error "$tool: NOT FOUND"
+    return 1
+}
+
+# Check if tool is installed with optional binary name
+# Args: $1 = tool name, $2 = binary name (optional, defaults to tool name)
+# Returns: 0 if installed, 1 if not
+check_tool_installed() {
+    local tool="$1"
+    local binary="${2:-$tool}"
+    check_tool "$binary" 1
+}
+
+# Get path to a tool
+# Args: $1 = tool name
+# Returns: path to tool or empty string, exit code 0 if found, 1 if not
+get_tool_path() {
+    local tool="$1"
+    local tool_path=""
+
+    # Reject empty tool name
+    [[ -z "$tool" ]] && { echo ""; return 1; }
+
+    # Try command -v first
+    if tool_path=$(command -v "$tool" 2>/dev/null); then
+        echo "$tool_path"
+        return 0
+    fi
+
+    # Fallback to comprehensive list of directories
+    for dir in "${TOOL_SEARCH_PATHS[@]}"; do
+        if [[ -x "${dir}/${tool}" ]]; then
+            echo "${dir}/${tool}"
+            return 0
+        fi
+    done
+
+    echo ""
+    return 1
+}
+
+# Get tool version (best-effort version detection)
+# Args: $1 = tool name
+# Returns: version string or empty; exits 1 if tool missing or version not parseable
+check_tool_version() {
+    local tool="$1"
+    local version_output=""
+    local version=""
+
+    # Check if tool exists first
+    if ! check_tool "$tool" 1; then
+        return 1
+    fi
+
+    # Try common version flags in order
+    local version_flags=("--version" "-version" "-v" "-V")
+    for flag in "${version_flags[@]}"; do
+        # Capture first line of output, suppress errors
+        version_output=$("$tool" "$flag" 2>/dev/null | head -n1) || continue
+        if [[ -n "$version_output" ]]; then
+            # Extract version-looking token (e.g., 1.2.3, 7.94, etc.)
+            if [[ "$version_output" =~ ([0-9]+\.[0-9]+(\.[0-9]+)?([._-][a-zA-Z0-9]+)?) ]]; then
+                version="${BASH_REMATCH[1]}"
+                echo "$version"
+                return 0
+            fi
+        fi
+    done
+
+    # Could not parse version
+    return 1
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# TOOL INSTALLATION
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Auto-install a missing tool (interactive mode only)
+# Args: $1 = tool name
+# Returns: 0 on success, 1 on failure or declined
+auto_install_tool() {
+    local tool="$1"
+    local pkg=""
+
+    [[ -z "$tool" ]] && return 1
+
+    # Already installed - nothing to do
+    if check_tool "$tool" 1; then
+        return 0
+    fi
+
+    # Resolve package name using distro-aware mapping
+    pkg=$(tool_package_name "$tool")
+
+    log_warning "$tool is not installed"
+
+    # Non-interactive mode: skip auto-install
+    if [[ "${VW_NON_INTERACTIVE:-0}" == "1" ]] || [[ ! -t 0 ]]; then
+        log_debug "Non-interactive mode: skipping auto-install for $tool"
+        return 1
+    fi
+
+    # Check if package manager is available
+    if [[ -z "${PKG_INSTALL:-}" ]]; then
+        log_error "Package manager not configured. Run detect_system first."
+        return 1
+    fi
+
+    # Prompt user for installation
+    if ! confirm "Install $tool (package: $pkg)?" "n"; then
+        log_info "User declined installation of $tool"
+        return 1
+    fi
+
+    # Attempt installation
+    log_info "Installing $pkg via package manager..."
+    # shellcheck disable=SC2086  # PKG_INSTALL intentionally uses word splitting
+    if run_with_sudo $PKG_INSTALL "$pkg"; then
+        # Verify installation succeeded
+        if check_tool "$tool" 1; then
+            log_success "$tool installed successfully"
+            log_audit "TOOL_INSTALL" "$tool" "success"
+            return 0
+        else
+            log_error "Package installed but $tool binary not found"
+            log_audit "TOOL_INSTALL" "$tool" "binary_not_found"
+            return 1
+        fi
+    else
+        log_error "Failed to install $tool"
+        log_audit "TOOL_INSTALL" "$tool" "failed"
+        return 1
+    fi
+}
+
+# Require multiple tools, auto-installing if needed
+# Args: list of tool names
+# Returns: 0 if all tools available, 1 if any missing
+require_tools() {
+    local missing=()
+    local tool=""
+
+    # Check each tool
+    for tool in "$@"; do
+        if ! check_tool "$tool" 1; then
+            missing+=("$tool")
+        fi
+    done
+
+    # All tools present
+    if [[ ${#missing[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    # Report missing tools
+    log_error "Missing tools: ${missing[*]}"
+
+    # Attempt auto-install for each missing tool
+    local failed=0
+    for tool in "${missing[@]}"; do
+        if ! auto_install_tool "$tool"; then
+            ((failed++)) || true
+        fi
+    done
+
+    # Check if all tools now available
+    if [[ $failed -gt 0 ]]; then
+        return 1
+    fi
+
+    # Final verification
+    for tool in "${missing[@]}"; do
+        if ! check_tool "$tool" 1; then
+            log_error "Tool $tool still not available after install attempt"
+            return 1
+        fi
+    done
+
+    return 0
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# TOOL STATUS DISPLAY
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Source UI library for draw_header (if not already loaded)
+# Note: This is safe because ui.sh has multiple-source protection
+source "${BASH_SOURCE%/*}/ui.sh" 2>/dev/null || true
+
+# Show categorized tool status dashboard
+# Displays all tools by category with installed/missing indicators
+# Shows progress bar in interactive mode while scanning tools
+show_tool_status() {
+    local category=""
+    local tools=""
+    local tool=""
+    local installed_count=0
+    local missing_count=0
+    local current_tool=0
+    local total_tools=0
+    local interactive=1
+
+    # Check if interactive mode
+    [[ "${VW_NON_INTERACTIVE:-0}" == "1" ]] || [[ ! -t 1 ]] && interactive=0
+
+    # Count total tools first (for progress bar)
+    for category in "${!TOOL_CATEGORIES[@]}"; do
+        for tool in ${TOOL_CATEGORIES[$category]}; do
+            ((++total_tools)) || true
+        done
+    done
+
+    # Show progress bar while scanning (interactive mode only)
+    if (( interactive && total_tools > 0 )); then
+        declare -f show_progress_bar &>/dev/null && show_progress_bar 0 "$total_tools" "Scanning tools" 30
+    fi
+
+    # Collect results in arrays to display after progress completes
+    declare -A category_results
+
+    # Iterate through categories and check tools
+    for category in "${!TOOL_CATEGORIES[@]}"; do
+        tools="${TOOL_CATEGORIES[$category]}"
+        local results=""
+
+        for tool in $tools; do
+            ((++current_tool)) || true
+
+            # Update progress bar (interactive mode only)
+            if (( interactive && total_tools > 0 )); then
+                declare -f show_progress_bar &>/dev/null && show_progress_bar "$current_tool" "$total_tools" "Scanning tools" 30
+            fi
+
+            if check_tool "$tool" 1; then
+                results+="${C_GREEN}✓${C_RESET} $tool\n"
+                ((++installed_count)) || true
+            else
+                results+="${C_RED}✗${C_RESET} $tool\n"
+                ((++missing_count)) || true
+            fi
+        done
+
+        category_results["$category"]="$results"
+    done
+
+    # Draw header
+    if declare -f draw_header &>/dev/null; then
+        draw_header "Tool Status"
+    else
+        echo
+        echo -e "    ${C_BOLD}${C_CYAN}Tool Status${C_RESET}"
+        echo -e "    ${C_CYAN}════════════════════════════════════════════════════════════════════════${C_RESET}"
+    fi
+
+    # Display results by category
+    for category in "${!TOOL_CATEGORIES[@]}"; do
+        echo
+        echo -e "    ${C_BOLD}${C_YELLOW}${category^^}${C_RESET}"
+        echo -ne "    ${category_results[$category]}"
+    done
+
+    # Summary
+    echo
+    echo -e "    ${C_CYAN}────────────────────────────────────────────────────────────────────────${C_RESET}"
+    echo -e "    ${C_GREEN}Installed:${C_RESET} $installed_count  ${C_RED}Missing:${C_RESET} $missing_count"
+    echo
+}
+
+# Verify all registered tools are available (quick background check)
+# Uses spinner for visual feedback in interactive mode
+# Returns: 0 if all tools available, 1 if any missing
+# Sets: _VERIFY_INSTALLED, _VERIFY_MISSING (space-separated tool names)
+verify_tool_availability() {
+    local interactive=1
+    [[ "${VW_NON_INTERACTIVE:-0}" == "1" ]] || [[ ! -t 1 ]] && interactive=0
+
+    # Create secure temp files (avoid predictable /tmp/.nr_* patterns)
+    local tmp_installed tmp_missing
+    tmp_installed=$(mktemp) || { log_error "Failed to create temp file"; return 1; }
+    tmp_missing=$(mktemp) || { rm -f "$tmp_installed"; log_error "Failed to create temp file"; return 1; }
+
+    # Inner function to check all tools (runs in background with spinner)
+    # Uses tmp_installed and tmp_missing from parent scope
+    _do_verify_tools() {
+        local installed_list=""
+        local missing_list=""
+        local tool=""
+
+        for tool in "${!TOOL_PACKAGES[@]}"; do
+            if check_tool "$tool" 1; then
+                installed_list+="$tool "
+            else
+                missing_list+="$tool "
+            fi
+        done
+
+        # Store results in temp files (background process can't set parent vars)
+        echo "${installed_list% }" > "$tmp_installed"
+        echo "${missing_list% }" > "$tmp_missing"
+    }
+
+    # Run with spinner in interactive mode, plain in non-interactive
+    if (( interactive )) && declare -f run_with_spinner &>/dev/null; then
+        run_with_spinner "Verifying tool availability" _do_verify_tools
+    else
+        _do_verify_tools
+    fi
+
+    # Read results from temp files
+    _VERIFY_INSTALLED=""
+    _VERIFY_MISSING=""
+    [[ -f "$tmp_installed" ]] && _VERIFY_INSTALLED=$(< "$tmp_installed")
+    [[ -f "$tmp_missing" ]] && _VERIFY_MISSING=$(< "$tmp_missing")
+
+    # Cleanup temp files
+    rm -f "$tmp_installed" "$tmp_missing" 2>/dev/null
+
+    # Count results
+    local installed_count=0
+    local missing_count=0
+    [[ -n "$_VERIFY_INSTALLED" ]] && installed_count=$(echo "$_VERIFY_INSTALLED" | wc -w)
+    [[ -n "$_VERIFY_MISSING" ]] && missing_count=$(echo "$_VERIFY_MISSING" | wc -w)
+
+    log_info "Tool verification complete: $installed_count installed, $missing_count missing"
+
+    # Return status based on missing tools
+    [[ $missing_count -eq 0 ]]
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# NETWORK INTERFACE DETECTION
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Check if network interface exists
+# Args: $1 = interface name
+# Returns: 0 if exists, 1 if not
+check_interface() {
+    local iface="$1"
+    [[ -z "$iface" ]] && return 1
+    [[ -d "/sys/class/net/$iface" ]]
+}
+
+# NOTE: is_wireless_interface is defined at the top of this file (line ~40)
+
+# List all wireless interfaces
+# Returns: space-separated list of wireless interface names
+list_wireless_interfaces() {
+    local interfaces=()
+
+    for iface in /sys/class/net/*; do
+        iface=$(basename "$iface")
+        if [[ -d "/sys/class/net/$iface/wireless" ]]; then
+            interfaces+=("$iface")
+        fi
+    done
+
+    echo "${interfaces[*]}"
+}
+
+# Alias for compatibility
+get_wireless_interfaces() {
+    list_wireless_interfaces
+}
+
+# Get the default/primary network interface
+# Returns: interface name or empty string
+get_default_interface() {
+    local iface=""
+
+    # Method 1: Parse default route
+    if command -v ip &>/dev/null; then
+        iface=$(ip route show default 2>/dev/null | awk '/default/ {print $5}' | head -n1)
+    fi
+
+    # Method 2: Fallback to route command
+    if [[ -z "$iface" ]] && command -v route &>/dev/null; then
+        iface=$(route -n 2>/dev/null | awk '/^0.0.0.0/ {print $8}' | head -n1)
+    fi
+
+    # Method 3: Find first active interface
+    if [[ -z "$iface" ]]; then
+        for i in /sys/class/net/*; do
+            local name
+            name=$(basename "$i")
+            [[ "$name" == "lo" ]] && continue
+            if [[ "$(cat "/sys/class/net/$name/operstate" 2>/dev/null)" == "up" ]]; then
+                iface="$name"
+                break
+            fi
+        done
+    fi
+
+    echo "$iface"
+}
+
+# Get interface state (up/down/unknown)
+# Args: $1 = interface name
+# Returns: up, down, or unknown
+get_interface_state() {
+    local iface="$1"
+    [[ -z "$iface" ]] && echo "unknown" && return
+
+    if [[ -f "/sys/class/net/$iface/operstate" ]]; then
+        cat "/sys/class/net/$iface/operstate" 2>/dev/null || echo "unknown"
+    else
+        echo "unknown"
+    fi
+}
+
+# Get interface MAC address
+# Args: $1 = interface name
+# Returns: MAC address or empty string
+get_interface_mac() {
+    local iface="$1"
+    [[ -z "$iface" ]] && return
+
+    if [[ -f "/sys/class/net/$iface/address" ]]; then
+        cat "/sys/class/net/$iface/address" 2>/dev/null
+    fi
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# SYSTEM DETECTION (MAIN FUNCTION)
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Detect system and setup all variables
+# Call this on startup to initialize detection
+detect_system() {
+    DISTRO=$(detect_distro)
+    DISTRO_FAMILY=$(detect_distro_family "$DISTRO")
+    setup_package_manager
+
+    # Detect special environments (these functions return 1 when not detected, so we use || true)
+    detect_immutable_system || true
+    detect_wsl || true
+    detect_container || true
+
+    local extra_info=""
+    [[ $IS_IMMUTABLE -eq 1 ]] && extra_info+=" [IMMUTABLE:${IMMUTABLE_TYPE:-unknown}]"
+    [[ $IS_STEAMDECK -eq 1 ]] && extra_info+=" [STEAMDECK]"
+    [[ $IS_WSL -eq 1 ]] && extra_info+=" [WSL]"
+    [[ $IS_CONTAINER -eq 1 ]] && extra_info+=" [CONTAINER]"
+
+    log_debug "System detected: $DISTRO ($DISTRO_FAMILY) with $PKG_MANAGER${extra_info}"
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# EXPORT FUNCTIONS
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Distribution detection
+export -f detect_distro detect_distro_family
+
+# Special environment detection
+export -f detect_immutable_system detect_wsl detect_container can_system_install
+
+# Immutable system helpers
+export -f unlock_immutable_filesystem lock_immutable_filesystem can_install_packages suggest_alternatives
+
+# Package manager
+export -f detect_package_manager setup_package_manager
+
+# Tool detection
+export -f check_tool check_tool_installed get_tool_path check_tool_version
+
+# Package name mapping (distro-aware)
+export -f tool_package_name
+
+# Tool installation
+export -f auto_install_tool require_tools
+
+# Tool status
+export -f show_tool_status verify_tool_availability
+
+# Network interfaces
+export -f check_interface is_wireless_interface
+export -f list_wireless_interfaces get_wireless_interfaces
+export -f get_default_interface get_interface_state get_interface_mac
+
+# System detection
+export -f detect_system
+
+# Export variables
+export DISTRO DISTRO_FAMILY
+export PKG_MANAGER PKG_INSTALL PKG_UPDATE PKG_SEARCH PKG_REMOVE
+export IS_IMMUTABLE IMMUTABLE_TYPE IS_WSL IS_CONTAINER IS_STEAMDECK

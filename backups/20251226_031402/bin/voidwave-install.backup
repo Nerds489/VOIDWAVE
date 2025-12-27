@@ -1,0 +1,2088 @@
+#!/usr/bin/env bash
+#═══════════════════════════════════════════════════════════════════════════════
+#
+#    VOIDWAVE UNIVERSAL ARSENAL INSTALLER v10.0.0
+#    Truly distro-agnostic tool installation
+#
+#    Copyright (c) 2025 Nerds489
+#    Licensed under the Apache License, Version 2.0
+#
+#    Designed with HIVEMIND multi-agent methodology:
+#    - INFRA-002: Universal package manager handling
+#    - DEV-001: Clean modular architecture
+#    - QA-001: Comprehensive verification
+#    - SEC-004: Security tool expertise
+#
+#═══════════════════════════════════════════════════════════════════════════════
+
+set -o pipefail
+
+#═══════════════════════════════════════════════════════════════════════════════
+# CONFIGURATION
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Script metadata
+VOIDWAVE_ROOT="${VOIDWAVE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+SCRIPT_NAME="voidwave-install"
+
+# Version from VERSION file
+if [[ -f "$VOIDWAVE_ROOT/VERSION" ]]; then
+    VERSION=$(cat "$VOIDWAVE_ROOT/VERSION" | tr -d '[:space:]')
+else
+    VERSION="10.0.0"
+fi
+
+# Cache directory for offline mode
+CACHE_DIR="${HOME}/.voidwave/cache"
+LOG_FILE="${HOME}/.voidwave/logs/install_$(date +%Y%m%d_%H%M%S).log"
+
+# Runtime flags
+DRY_RUN=0
+VERBOSE=0
+OFFLINE_MODE=0
+FORCE_REINSTALL=0
+NO_VERIFY=0
+USER_INSTALL_MODE=0
+
+#═══════════════════════════════════════════════════════════════════════════════
+# COLORS & OUTPUT
+#═══════════════════════════════════════════════════════════════════════════════
+
+if [[ -t 1 ]] && [[ "${NO_COLOR:-}" != "1" ]]; then
+    C_RESET='\033[0m'
+    C_RED='\033[0;31m'
+    C_GREEN='\033[0;32m'
+    C_YELLOW='\033[0;33m'
+    C_BLUE='\033[0;34m'
+    C_CYAN='\033[0;36m'
+    C_GRAY='\033[0;90m'
+    C_BOLD='\033[1m'
+else
+    C_RESET='' C_RED='' C_GREEN='' C_YELLOW=''
+    C_BLUE='' C_CYAN='' C_GRAY='' C_BOLD=''
+fi
+
+# Output helpers with clean formatting
+_log()     { echo -e "$*" | tee -a "$LOG_FILE" 2>/dev/null; }
+_ok()      { _log "    ${C_GREEN}[OK]${C_RESET}   $*"; }
+_fail()    { _log "    ${C_RED}[FAIL]${C_RESET} $*"; }
+_skip()    { _log "    ${C_GRAY}[SKIP]${C_RESET} $*"; }
+_info()    { _log "    ${C_CYAN}[INFO]${C_RESET} $*"; }
+_warn()    { _log "    ${C_YELLOW}[WARN]${C_RESET} $*"; }
+_debug()   { [[ $VERBOSE -eq 1 ]] && _log "    ${C_GRAY}[DBG]${C_RESET}  $*"; }
+_progress(){ echo -ne "    ${C_CYAN}[....]${C_RESET} $*\r"; }
+
+#═══════════════════════════════════════════════════════════════════════════════
+# STATISTICS TRACKING
+#═══════════════════════════════════════════════════════════════════════════════
+
+declare -a INSTALLED_TOOLS=()
+declare -a FAILED_TOOLS=()
+declare -a SKIPPED_TOOLS=()
+declare -A INSTALL_METHODS=()  # tool -> method used
+
+#═══════════════════════════════════════════════════════════════════════════════
+# DISTRO DETECTION (Comprehensive)
+#═══════════════════════════════════════════════════════════════════════════════
+
+declare -g DISTRO=""
+declare -g DISTRO_FAMILY=""
+declare -g DISTRO_VERSION=""
+declare -g PKG_MANAGER=""
+declare -g AUR_HELPER=""
+
+# Special system flags
+declare -g IS_IMMUTABLE=0
+declare -g IS_STEAMDECK=0
+declare -g IS_WSL=0
+
+# Detect immutable systems
+detect_immutable() {
+    IS_IMMUTABLE=0
+    IS_STEAMDECK=0
+
+    if [[ -f /etc/os-release ]]; then
+        local os_id
+        os_id=$(grep -E "^ID=" /etc/os-release | cut -d= -f2 | tr -d '"')
+        case "$os_id" in
+            steamos|bazzite|chimeraos|vanilla|blendos)
+                IS_IMMUTABLE=1
+                [[ "$os_id" == "steamos" || "$os_id" == "bazzite" ]] && IS_STEAMDECK=1
+                return 0
+                ;;
+        esac
+    fi
+
+    # rpm-ostree systems
+    command -v rpm-ostree &>/dev/null && { IS_IMMUTABLE=1; return 0; }
+
+    # ostree systems
+    [[ -d /ostree ]] || [[ -d /sysroot/ostree ]] && { IS_IMMUTABLE=1; return 0; }
+
+    # NixOS
+    [[ -f /etc/NIXOS ]] || [[ -d /nix/store ]] && { IS_IMMUTABLE=1; return 0; }
+
+    return 1
+}
+
+# Detect WSL
+detect_wsl() {
+    IS_WSL=0
+    [[ -f /proc/version ]] && grep -qiE "(microsoft|wsl)" /proc/version 2>/dev/null && { IS_WSL=1; return 0; }
+    [[ -n "${WSL_DISTRO_NAME:-}" ]] && { IS_WSL=1; return 0; }
+    return 1
+}
+
+# Detect rpm-ostree based systems
+detect_rpm_ostree() {
+    command -v rpm-ostree &>/dev/null && return 0
+    return 1
+}
+
+# Detect Linux distribution from multiple sources
+detect_distro() {
+    local id="" id_like="" version=""
+
+    # Method 1: /etc/os-release (standard)
+    if [[ -f /etc/os-release ]]; then
+        id=$(grep -E "^ID=" /etc/os-release | cut -d= -f2 | tr -d '"')
+        id_like=$(grep -E "^ID_LIKE=" /etc/os-release | cut -d= -f2 | tr -d '"')
+        version=$(grep -E "^VERSION_ID=" /etc/os-release | cut -d= -f2 | tr -d '"')
+    fi
+
+    # Method 2: lsb_release fallback
+    if [[ -z "$id" ]] && command -v lsb_release &>/dev/null; then
+        id=$(lsb_release -is 2>/dev/null | tr '[:upper:]' '[:lower:]')
+        version=$(lsb_release -rs 2>/dev/null)
+    fi
+
+    # Method 3: Distribution-specific files
+    if [[ -z "$id" ]]; then
+        [[ -f /etc/debian_version ]] && id="debian"
+        [[ -f /etc/fedora-release ]] && id="fedora"
+        [[ -f /etc/centos-release ]] && id="centos"
+        [[ -f /etc/arch-release ]] && id="arch"
+        [[ -f /etc/gentoo-release ]] && id="gentoo"
+        [[ -f /etc/alpine-release ]] && id="alpine"
+        [[ -f /etc/void-release ]] && id="void"
+        [[ -f /etc/NIXOS ]] && id="nixos"
+    fi
+
+    DISTRO="${id:-unknown}"
+    DISTRO_VERSION="${version:-}"
+
+    # Determine family from ID or ID_LIKE
+    case "$DISTRO" in
+        # Debian family
+        debian|ubuntu|kali|parrot|linuxmint|pop|elementary|zorin|mx|raspbian|devuan|deepin|pureos)
+            DISTRO_FAMILY="debian" ;;
+        # Red Hat family (including immutable variants)
+        fedora|rhel|centos|rocky|alma|oracle|amazon|nobara|ultramarine|silverblue|kinoite|sericea|onyx)
+            DISTRO_FAMILY="redhat" ;;
+        # Arch family (including SteamOS which is Arch-based)
+        arch|manjaro|endeavouros|blackarch|arcolinux|garuda|artix|cachyos|steamos|bazzite|chimeraos)
+            DISTRO_FAMILY="arch" ;;
+        # SUSE family
+        opensuse*|suse|sles|opensuse-leap|opensuse-tumbleweed|opensuse-microos|aeon|kalpa)
+            DISTRO_FAMILY="suse" ;;
+        # Alpine
+        alpine|postmarketos)
+            DISTRO_FAMILY="alpine" ;;
+        # Gentoo family
+        gentoo|funtoo|calculate)
+            DISTRO_FAMILY="gentoo" ;;
+        # Void Linux
+        void)
+            DISTRO_FAMILY="void" ;;
+        # NixOS
+        nixos)
+            DISTRO_FAMILY="nix" ;;
+        # Solus
+        solus)
+            DISTRO_FAMILY="solus" ;;
+        # VanillaOS and similar (Debian-based but immutable)
+        vanilla|blendos)
+            DISTRO_FAMILY="debian" ;;
+        # ChromeOS/Crostini
+        chromeos|cros)
+            DISTRO_FAMILY="debian" ;;
+        *)
+            # Try id_like for unknown distros
+            if [[ -n "$id_like" ]]; then
+                case "$id_like" in
+                    *debian*|*ubuntu*) DISTRO_FAMILY="debian" ;;
+                    *rhel*|*fedora*|*centos*) DISTRO_FAMILY="redhat" ;;
+                    *arch*) DISTRO_FAMILY="arch" ;;
+                    *suse*) DISTRO_FAMILY="suse" ;;
+                    *) DISTRO_FAMILY="unknown" ;;
+                esac
+            else
+                DISTRO_FAMILY="unknown"
+            fi
+            ;;
+    esac
+}
+
+# Detect package manager by availability
+detect_package_manager() {
+    # Check in priority order (most common/capable first)
+    if command -v apt-get &>/dev/null; then
+        PKG_MANAGER="apt"
+    elif command -v dnf &>/dev/null; then
+        # Check for rpm-ostree on Fedora-based systems
+        if detect_rpm_ostree; then
+            PKG_MANAGER="rpm-ostree"
+        else
+            PKG_MANAGER="dnf"
+        fi
+    elif command -v yum &>/dev/null; then
+        PKG_MANAGER="yum"
+    elif command -v pacman &>/dev/null; then
+        PKG_MANAGER="pacman"
+    elif command -v zypper &>/dev/null; then
+        PKG_MANAGER="zypper"
+    elif command -v apk &>/dev/null; then
+        PKG_MANAGER="apk"
+    elif command -v emerge &>/dev/null; then
+        PKG_MANAGER="emerge"
+    elif command -v xbps-install &>/dev/null; then
+        PKG_MANAGER="xbps"
+    elif command -v nix-env &>/dev/null; then
+        PKG_MANAGER="nix"
+    elif command -v eopkg &>/dev/null; then
+        PKG_MANAGER="eopkg"
+    elif command -v flatpak &>/dev/null; then
+        PKG_MANAGER="flatpak"
+    elif command -v distrobox &>/dev/null; then
+        PKG_MANAGER="distrobox"
+    else
+        PKG_MANAGER="unknown"
+        return 1
+    fi
+    return 0
+}
+
+# Detect AUR helper for Arch-based systems
+detect_aur_helper() {
+    [[ "$DISTRO_FAMILY" != "arch" ]] && return 1
+
+    # Check helpers in preference order
+    for helper in paru yay pikaur trizen; do
+        if command -v "$helper" &>/dev/null; then
+            AUR_HELPER="$helper"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# Setup workarounds for immutable systems
+setup_immutable_workarounds() {
+    [[ $IS_IMMUTABLE -eq 0 ]] && return 0
+
+    echo
+    echo -e "    ${C_YELLOW}[!] IMMUTABLE SYSTEM DETECTED${C_RESET}"
+    echo
+
+    # Check if distrobox is available
+    if command -v distrobox &>/dev/null; then
+        _info "Distrobox detected - can be used for tools not available via ${PKG_MANAGER}"
+        _info "Example: ${C_CYAN}distrobox create --name pentest --image archlinux${C_RESET}"
+        _info "         ${C_CYAN}distrobox enter pentest${C_RESET}"
+    else
+        _warn "Distrobox not found - recommended for installing additional tools"
+        _info "Install: ${C_CYAN}curl -s https://raw.githubusercontent.com/89luca89/distrobox/main/install | sh -s -- --prefix ~/.local${C_RESET}"
+    fi
+
+    # Check if flatpak is available
+    if command -v flatpak &>/dev/null; then
+        _info "Flatpak detected - some GUI tools may be available as Flatpaks"
+    else
+        _warn "Flatpak not found - may limit GUI application availability"
+    fi
+
+    # Steam Deck specific advice
+    if [[ $IS_STEAMDECK -eq 1 ]]; then
+        echo
+        _warn "Steam Deck detected - system updates will reset /usr changes"
+        _info "Recommendations:"
+        _info "  1. Use ${C_CYAN}distrobox${C_RESET} for persistent tool installations"
+        _info "  2. Install tools to ${C_CYAN}~/.local/bin${C_RESET} when possible"
+        _info "  3. Consider using Flatpak for GUI applications"
+        echo
+        echo -ne "    ${C_YELLOW}Continue with installation? [y/N]${C_RESET} "
+        read -r response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            _info "Installation cancelled"
+            exit 0
+        fi
+    fi
+
+    echo
+    return 0
+}
+
+# Main system detection
+detect_system() {
+    detect_distro
+    detect_immutable || true
+    detect_wsl || true
+
+    if ! detect_package_manager; then
+        return 1
+    fi
+
+    detect_aur_helper
+    return 0
+}
+
+# Pretty print system info
+show_system_info() {
+    local distro_display="${DISTRO^}"
+
+    # Format common distro names nicely
+    case "$DISTRO" in
+        kali) distro_display="Kali Linux" ;;
+        ubuntu) distro_display="Ubuntu" ;;
+        debian) distro_display="Debian" ;;
+        parrot) distro_display="Parrot OS" ;;
+        fedora) distro_display="Fedora" ;;
+        arch) distro_display="Arch Linux" ;;
+        manjaro) distro_display="Manjaro" ;;
+        blackarch) distro_display="BlackArch" ;;
+        endeavouros) distro_display="EndeavourOS" ;;
+        opensuse*) distro_display="openSUSE" ;;
+        alpine) distro_display="Alpine Linux" ;;
+        void) distro_display="Void Linux" ;;
+        nixos) distro_display="NixOS" ;;
+        gentoo) distro_display="Gentoo" ;;
+        rocky) distro_display="Rocky Linux" ;;
+        alma) distro_display="AlmaLinux" ;;
+        steamos) distro_display="SteamOS (Steam Deck)" ;;
+        bazzite) distro_display="Bazzite (Steam Deck)" ;;
+        chimeraos) distro_display="ChimeraOS" ;;
+        silverblue) distro_display="Fedora Silverblue" ;;
+        kinoite) distro_display="Fedora Kinoite" ;;
+        vanilla) distro_display="VanillaOS" ;;
+    esac
+
+    echo
+    _info "System: ${C_GREEN}${distro_display}${C_RESET}${DISTRO_VERSION:+ $DISTRO_VERSION}"
+    _info "Family: ${C_GREEN}${DISTRO_FAMILY}${C_RESET}"
+    _info "Package Manager: ${C_GREEN}${PKG_MANAGER}${C_RESET}"
+    [[ -n "$AUR_HELPER" ]] && _info "AUR Helper: ${C_GREEN}${AUR_HELPER}${C_RESET}"
+    [[ $IS_IMMUTABLE -eq 1 ]] && _info "System Type: ${C_YELLOW}Immutable${C_RESET}"
+    [[ $IS_STEAMDECK -eq 1 ]] && _info "Device: ${C_CYAN}Steam Deck${C_RESET}"
+    [[ $IS_WSL -eq 1 ]] && _info "Environment: ${C_CYAN}WSL${C_RESET}"
+
+    # Warning for rpm-ostree systems
+    if [[ "$PKG_MANAGER" == "rpm-ostree" ]]; then
+        _warn "rpm-ostree detected: A reboot may be required after installing packages"
+    fi
+
+    echo
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# PACKAGE NAME MAPPING
+# Maps generic tool names to distro-specific package names
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Usage: pkg=$(get_pkg_name "toolname")
+# Returns empty string if no mapping exists (try pip/go/etc)
+get_pkg_name() {
+    local tool="$1"
+    local pkg=""
+
+    case "$tool" in
+        #───────────────────────────────────────────────────────────────────────
+        # SCANNING TOOLS
+        #───────────────────────────────────────────────────────────────────────
+        nmap)
+            case "$DISTRO_FAMILY" in
+                nix) pkg="nmap" ;;
+                *) pkg="nmap" ;;
+            esac
+            ;;
+        masscan)
+            case "$DISTRO_FAMILY" in
+                debian|redhat|arch|alpine) pkg="masscan" ;;
+                suse) pkg="masscan" ;;
+                gentoo) pkg="net-analyzer/masscan" ;;
+            esac
+            ;;
+        rustscan)
+            case "$DISTRO_FAMILY" in
+                arch) pkg="rustscan" ;;  # AUR
+                *) pkg="" ;;  # GitHub/cargo
+            esac
+            ;;
+        zmap)
+            case "$DISTRO_FAMILY" in
+                debian|arch) pkg="zmap" ;;
+                redhat) pkg="zmap" ;;  # EPEL
+            esac
+            ;;
+        arp-scan)
+            case "$DISTRO_FAMILY" in
+                debian|arch|redhat) pkg="arp-scan" ;;
+                suse) pkg="arp-scan" ;;
+                alpine) pkg="arp-scan" ;;
+            esac
+            ;;
+        netdiscover)
+            case "$DISTRO_FAMILY" in
+                debian|arch) pkg="netdiscover" ;;
+            esac
+            ;;
+        hping3)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="hping3" ;;
+                arch) pkg="hping" ;;
+                redhat) pkg="hping3" ;;
+                suse) pkg="hping" ;;
+            esac
+            ;;
+        fping)
+            pkg="fping"
+            ;;
+
+        #───────────────────────────────────────────────────────────────────────
+        # WIRELESS TOOLS
+        #───────────────────────────────────────────────────────────────────────
+        aircrack-ng)
+            case "$DISTRO_FAMILY" in
+                nix) pkg="aircrack-ng" ;;
+                *) pkg="aircrack-ng" ;;
+            esac
+
+        reaver)
+            case "$DISTRO_FAMILY" in
+                debian|arch) pkg="reaver" ;;
+            esac
+            ;;
+        bully)
+            case "$DISTRO_FAMILY" in
+                debian|arch) pkg="bully" ;;
+            esac
+            ;;
+        pixiewps)
+            case "$DISTRO_FAMILY" in
+                debian|arch) pkg="pixiewps" ;;
+            esac
+            ;;
+        wifite)
+            case "$DISTRO_FAMILY" in
+                debian|arch) pkg="wifite" ;;
+            esac
+            ;;
+        kismet)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="kismet" ;;
+                arch) pkg="kismet" ;;
+                redhat) pkg="kismet" ;;
+            esac
+            ;;
+        bettercap)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="bettercap" ;;
+                arch) pkg="bettercap" ;;
+            esac
+            ;;
+        mdk3)
+            case "$DISTRO_FAMILY" in
+                debian|arch) pkg="mdk3" ;;
+            esac
+            ;;
+        mdk4)
+            case "$DISTRO_FAMILY" in
+                debian|arch) pkg="mdk4" ;;
+            esac
+            ;;
+        hostapd)
+            pkg="hostapd"
+            ;;
+        cowpatty)
+            case "$DISTRO_FAMILY" in
+                debian|arch) pkg="cowpatty" ;;
+            esac
+            ;;
+        hcxdumptool)
+            case "$DISTRO_FAMILY" in
+                debian|arch) pkg="hcxdumptool" ;;
+            esac
+            ;;
+        hcxtools)
+            case "$DISTRO_FAMILY" in
+                debian|arch) pkg="hcxtools" ;;
+            esac
+            ;;
+        wpa_supplicant)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="wpasupplicant" ;;
+                arch|redhat|suse|alpine) pkg="wpa_supplicant" ;;
+            esac
+            ;;
+
+        #───────────────────────────────────────────────────────────────────────
+        # WEB TOOLS
+        #───────────────────────────────────────────────────────────────────────
+        nikto)
+            case "$DISTRO_FAMILY" in
+                debian|arch|redhat) pkg="nikto" ;;
+            esac
+            ;;
+        dirb)
+            case "$DISTRO_FAMILY" in
+                debian|arch) pkg="dirb" ;;
+            esac
+            ;;
+        gobuster)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="gobuster" ;;
+                arch) pkg="gobuster" ;;
+            esac
+            ;;
+        ffuf)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="ffuf" ;;
+                arch) pkg="ffuf" ;;
+            esac
+            ;;
+        wpscan)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="wpscan" ;;
+            esac
+            ;;
+        whatweb)
+            case "$DISTRO_FAMILY" in
+                debian|arch) pkg="whatweb" ;;
+            esac
+            ;;
+        sqlmap)
+            case "$DISTRO_FAMILY" in
+                debian|arch) pkg="sqlmap" ;;
+            esac
+            ;;
+        burpsuite)
+            case "$DISTRO_FAMILY" in
+                arch) pkg="burpsuite" ;;  # AUR
+            esac
+            ;;
+
+        #───────────────────────────────────────────────────────────────────────
+        # EXPLOIT TOOLS
+        #───────────────────────────────────────────────────────────────────────
+        metasploit-framework|metasploit)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="metasploit-framework" ;;
+                arch) pkg="metasploit" ;;
+            esac
+            ;;
+        exploitdb|searchsploit)
+            case "$DISTRO_FAMILY" in
+                debian|arch) pkg="exploitdb" ;;
+            esac
+            ;;
+        set|setoolkit)
+            case "$DISTRO_FAMILY" in
+                arch) pkg="social-engineer-toolkit" ;;  # AUR
+            esac
+            ;;
+
+        #───────────────────────────────────────────────────────────────────────
+        # CREDENTIAL TOOLS
+        #───────────────────────────────────────────────────────────────────────
+        hashcat)
+            case "$DISTRO_FAMILY" in
+                nix) pkg="hashcat" ;;
+                *) pkg="hashcat" ;;
+            esac
+            ;;
+        john|john-the-ripper)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="john" ;;
+                redhat) pkg="john" ;;
+                arch) pkg="john" ;;
+                suse) pkg="john" ;;
+                alpine) pkg="john" ;;
+                gentoo) pkg="app-crypt/johntheripper" ;;
+                nix) pkg="john" ;;
+            esac
+            ;;
+        hydra)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="hydra" ;;
+                redhat) pkg="hydra" ;;
+                arch) pkg="hydra" ;;
+                suse) pkg="hydra" ;;
+                gentoo) pkg="net-analyzer/hydra" ;;
+                nix) pkg="thc-hydra" ;;
+            esac
+            ;;
+        medusa)
+            case "$DISTRO_FAMILY" in
+                debian|arch|redhat) pkg="medusa" ;;
+            esac
+            ;;
+        ncrack)
+            case "$DISTRO_FAMILY" in
+                debian|arch) pkg="ncrack" ;;
+            esac
+            ;;
+        ophcrack)
+            case "$DISTRO_FAMILY" in
+                debian|arch) pkg="ophcrack" ;;
+            esac
+            ;;
+
+        #───────────────────────────────────────────────────────────────────────
+        # TRAFFIC TOOLS
+        #───────────────────────────────────────────────────────────────────────
+        tcpdump)
+            case "$DISTRO_FAMILY" in
+                nix) pkg="tcpdump" ;;
+                *) pkg="tcpdump" ;;
+            esac
+            ;;
+        wireshark)
+            case "$DISTRO_FAMILY" in
+                arch) pkg="wireshark-qt" ;;
+                nix) pkg="wireshark" ;;
+                *) pkg="wireshark" ;;
+            esac
+            ;;
+        tshark)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="tshark" ;;
+                arch) pkg="wireshark-cli" ;;
+                redhat) pkg="wireshark-cli" ;;
+                *) pkg="tshark" ;;
+            esac
+            ;;
+        ettercap)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="ettercap-common" ;;
+                arch) pkg="ettercap" ;;
+                redhat) pkg="ettercap" ;;
+            esac
+            ;;
+        dsniff)
+            case "$DISTRO_FAMILY" in
+                debian|arch) pkg="dsniff" ;;
+            esac
+            ;;
+        ngrep)
+            pkg="ngrep"
+            ;;
+
+        #───────────────────────────────────────────────────────────────────────
+        # OSINT TOOLS
+        #───────────────────────────────────────────────────────────────────────
+        theharvester)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="theharvester" ;;
+            esac
+            ;;
+        recon-ng)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="recon-ng" ;;
+            esac
+            ;;
+        maltego)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="maltego" ;;
+            esac
+            ;;
+        spiderfoot)
+            case "$DISTRO_FAMILY" in
+                arch) pkg="spiderfoot" ;;  # AUR
+            esac
+            ;;
+        exiftool)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="libimage-exiftool-perl" ;;
+                arch) pkg="perl-image-exiftool" ;;
+                redhat) pkg="perl-Image-ExifTool" ;;
+                alpine) pkg="exiftool" ;;
+            esac
+            ;;
+        whois)
+            case "$DISTRO_FAMILY" in
+                debian|arch|alpine) pkg="whois" ;;
+                redhat) pkg="whois" ;;
+            esac
+            ;;
+
+        #───────────────────────────────────────────────────────────────────────
+        # STRESS TOOLS
+        #───────────────────────────────────────────────────────────────────────
+        iperf3)
+            case "$DISTRO_FAMILY" in
+                debian|arch|alpine) pkg="iperf3" ;;
+                redhat) pkg="iperf3" ;;  # EPEL
+                suse) pkg="iperf" ;;
+            esac
+            ;;
+        siege)
+            case "$DISTRO_FAMILY" in
+                debian|arch|redhat) pkg="siege" ;;
+            esac
+            ;;
+
+        #───────────────────────────────────────────────────────────────────────
+        # UTILITIES
+        #───────────────────────────────────────────────────────────────────────
+        netcat|nc)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="netcat-openbsd" ;;
+                redhat) pkg="nmap-ncat" ;;
+                arch) pkg="openbsd-netcat" ;;
+                alpine) pkg="netcat-openbsd" ;;
+                suse) pkg="netcat-openbsd" ;;
+                *) pkg="netcat" ;;
+            esac
+            ;;
+        socat)
+            pkg="socat"
+            ;;
+        curl)
+            pkg="curl"
+            ;;
+        wget)
+            pkg="wget"
+            ;;
+        git)
+            pkg="git"
+            ;;
+        jq)
+            pkg="jq"
+            ;;
+        unzip)
+            pkg="unzip"
+            ;;
+        tor)
+            pkg="tor"
+            ;;
+        proxychains|proxychains-ng)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="proxychains4" ;;
+                arch) pkg="proxychains-ng" ;;
+                redhat) pkg="proxychains-ng" ;;
+            esac
+            ;;
+        tmux)
+            pkg="tmux"
+            ;;
+        screen)
+            pkg="screen"
+            ;;
+
+        #───────────────────────────────────────────────────────────────────────
+        # BUILD TOOLS
+        #───────────────────────────────────────────────────────────────────────
+        build-essential|base-devel)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="build-essential" ;;
+                arch) pkg="base-devel" ;;
+                redhat) pkg="gcc make" ;;
+                suse) pkg="gcc make" ;;
+                alpine) pkg="build-base" ;;
+                gentoo) pkg="sys-devel/gcc sys-devel/make" ;;
+                void) pkg="base-devel" ;;
+            esac
+            ;;
+        python3-pip|pip|pip3)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="python3-pip" ;;
+                arch) pkg="python-pip" ;;
+                redhat) pkg="python3-pip" ;;
+                suse) pkg="python3-pip" ;;
+                alpine) pkg="py3-pip" ;;
+                gentoo) pkg="dev-python/pip" ;;
+                void) pkg="python3-pip" ;;
+            esac
+            ;;
+        golang|go)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="golang-go" ;;
+                arch) pkg="go" ;;
+                redhat) pkg="golang" ;;
+                suse) pkg="go" ;;
+                alpine) pkg="go" ;;
+                void) pkg="go" ;;
+            esac
+            ;;
+        rust|cargo)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="cargo" ;;
+                arch) pkg="rust" ;;
+                redhat) pkg="rust cargo" ;;
+                alpine) pkg="cargo" ;;
+            esac
+            ;;
+        ruby|gem)
+            case "$DISTRO_FAMILY" in
+                debian) pkg="ruby-full" ;;
+                arch) pkg="ruby" ;;
+                redhat) pkg="ruby" ;;
+                alpine) pkg="ruby" ;;
+            esac
+            ;;
+
+        *)
+            # No specific mapping - try package name as-is
+            pkg="$tool"
+            ;;
+    esac
+
+    echo "$pkg"
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# GO TOOL MAPPINGS (for go install fallback)
+#═══════════════════════════════════════════════════════════════════════════════
+
+declare -A GO_PACKAGES=(
+    [gobuster]="github.com/OJ/gobuster/v3@latest"
+    [ffuf]="github.com/ffuf/ffuf/v2@latest"
+    [nuclei]="github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"
+    [httpx]="github.com/projectdiscovery/httpx/cmd/httpx@latest"
+    [subfinder]="github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"
+    [dnsx]="github.com/projectdiscovery/dnsx/cmd/dnsx@latest"
+    [naabu]="github.com/projectdiscovery/naabu/v2/cmd/naabu@latest"
+    [katana]="github.com/projectdiscovery/katana/cmd/katana@latest"
+    [gau]="github.com/lc/gau/v2/cmd/gau@latest"
+    [waybackurls]="github.com/tomnomnom/waybackurls@latest"
+    [httprobe]="github.com/tomnomnom/httprobe@latest"
+    [assetfinder]="github.com/tomnomnom/assetfinder@latest"
+    [amass]="github.com/owasp-amass/amass/v4/...@master"
+    [bettercap]="github.com/bettercap/bettercap@latest"
+    [gf]="github.com/tomnomnom/gf@latest"
+    [qsreplace]="github.com/tomnomnom/qsreplace@latest"
+    [anew]="github.com/tomnomnom/anew@latest"
+)
+
+#═══════════════════════════════════════════════════════════════════════════════
+# PIP TOOL MAPPINGS
+#═══════════════════════════════════════════════════════════════════════════════
+
+declare -A PIP_PACKAGES=(
+    [theharvester]="theHarvester"
+    [sqlmap]="sqlmap"
+    [wifite]="wifite"
+    [shodan]="shodan"
+    [recon-ng]="recon-ng"
+    [crackmapexec]="crackmapexec"
+    [impacket]="impacket"
+    [pwntools]="pwntools"
+    [scapy]="scapy"
+    [slowloris]="slowloris"
+    [dirsearch]="dirsearch"
+    [arjun]="arjun"
+    [paramspider]="paramspider"
+)
+
+#═══════════════════════════════════════════════════════════════════════════════
+# CARGO TOOL MAPPINGS
+#═══════════════════════════════════════════════════════════════════════════════
+
+declare -A CARGO_PACKAGES=(
+    [rustscan]="rustscan"
+    [feroxbuster]="feroxbuster"
+    [ripgrep]="ripgrep"
+    [fd]="fd-find"
+    [bat]="bat"
+)
+
+#═══════════════════════════════════════════════════════════════════════════════
+# GITHUB RELEASE MAPPINGS
+#═══════════════════════════════════════════════════════════════════════════════
+
+declare -A GITHUB_REPOS=(
+    [rustscan]="RustScan/RustScan"
+    [nuclei]="projectdiscovery/nuclei"
+    [httpx]="projectdiscovery/httpx"
+    [subfinder]="projectdiscovery/subfinder"
+    [naabu]="projectdiscovery/naabu"
+    [katana]="projectdiscovery/katana"
+    [amass]="owasp-amass/amass"
+    [feroxbuster]="epi052/feroxbuster"
+    [ffuf]="ffuf/ffuf"
+    [gobuster]="OJ/gobuster"
+)
+
+#═══════════════════════════════════════════════════════════════════════════════
+# PACKAGE MANAGER OPERATIONS
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Update package lists
+pkg_update() {
+    _info "Updating package lists..."
+
+    case "$PKG_MANAGER" in
+        apt)
+            DEBIAN_FRONTEND=noninteractive apt-get update -qq 2>/dev/null
+            ;;
+        dnf)
+            dnf check-update -q 2>/dev/null || true  # Returns 100 if updates available
+            ;;
+        yum)
+            yum check-update -q 2>/dev/null || true
+            ;;
+        rpm-ostree)
+            rpm-ostree upgrade --check 2>/dev/null || true
+            ;;
+        pacman)
+            pacman -Sy --noconfirm 2>/dev/null
+            ;;
+        zypper)
+            zypper refresh -q 2>/dev/null
+            ;;
+        apk)
+            apk update -q 2>/dev/null
+            ;;
+        emerge)
+            emerge --sync -q 2>/dev/null
+            ;;
+        xbps)
+            xbps-install -S 2>/dev/null
+            ;;
+        nix)
+            nix-channel --update 2>/dev/null
+            ;;
+        eopkg)
+            eopkg update-repo 2>/dev/null
+            ;;
+    esac
+
+    return 0
+}
+
+# Install package via native package manager
+    # In user install mode, skip package manager on Arch-based systems
+    # and rely on pip/go/cargo instead
+    if [[ $USER_INSTALL_MODE -eq 1 ]]; then
+        if [[ "$DISTRO_FAMILY" == "arch" ]]; then
+            # Try without sudo for Arch-based systems
+            pacman -S --noconfirm --needed "$package" 2>/dev/null && return 0
+            # If that fails, skip and let fallback methods handle it
+            return 1
+        fi
+        # For other systems in user mode, skip package manager entirely
+        return 1
+    fi
+
+# Returns: 0 on success, 1 on failure
+pkg_install() {
+    local package="$1"
+    [[ -z "$package" ]] && return 1
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        _debug "DRY-RUN: Would install package: $package"
+        return 0
+    fi
+
+    case "$PKG_MANAGER" in
+        apt)
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$package" 2>/dev/null
+            ;;
+        dnf)
+            dnf install -y -q "$package" 2>/dev/null
+            ;;
+        yum)
+            yum install -y -q "$package" 2>/dev/null
+            ;;
+        rpm-ostree)
+            rpm-ostree install -y --allow-inactive "$package" 2>/dev/null
+            ;;
+        pacman)
+            pacman -S --noconfirm --needed "$package" 2>/dev/null
+            ;;
+        zypper)
+            zypper install -y -q "$package" 2>/dev/null
+            ;;
+        apk)
+            apk add -q "$package" 2>/dev/null
+            ;;
+        emerge)
+            emerge -q "$package" 2>/dev/null
+            ;;
+        xbps)
+            xbps-install -y "$package" 2>/dev/null
+            ;;
+        nix)
+            NIXPKGS_ALLOW_UNFREE=1 nix-env -iA "nixpkgs.$package" 2>/dev/null
+            ;;
+        eopkg)
+            eopkg install -y "$package" 2>/dev/null
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Install via AUR helper (Arch-based only)
+aur_install() {
+    local package="$1"
+    [[ -z "$AUR_HELPER" ]] && return 1
+    [[ -z "$package" ]] && return 1
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        _debug "DRY-RUN: Would AUR install: $package"
+        return 0
+    fi
+
+    case "$AUR_HELPER" in
+        paru)
+            sudo -u "$SUDO_USER" paru -S --noconfirm --needed "$package" 2>/dev/null
+            ;;
+        yay)
+            sudo -u "$SUDO_USER" yay -S --noconfirm --needed "$package" 2>/dev/null
+            ;;
+        pikaur)
+            sudo -u "$SUDO_USER" pikaur -S --noconfirm "$package" 2>/dev/null
+            ;;
+        trizen)
+            sudo -u "$SUDO_USER" trizen -S --noconfirm "$package" 2>/dev/null
+            ;;
+    esac
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# ALTERNATIVE INSTALLATION METHODS
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Install via pip
+pip_install() {
+    local package="$1"
+    [[ -z "$package" ]] && return 1
+
+    # Check for pip
+    local pip_cmd=""
+    if command -v pip3 &>/dev/null; then
+        pip_cmd="pip3"
+    elif command -v pip &>/dev/null; then
+        pip_cmd="pip"
+    else
+        return 1
+    fi
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        _debug "DRY-RUN: Would pip install: $package"
+        return 0
+    fi
+
+    # Try with --break-system-packages first (newer pip), then without
+    $pip_cmd install "$package" --user --break-system-packages 2>/dev/null || \
+    $pip_cmd install "$package" --user 2>/dev/null
+}
+
+# Install via pipx (isolated)
+pipx_install() {
+    local package="$1"
+    [[ -z "$package" ]] && return 1
+
+    command -v pipx &>/dev/null || return 1
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        _debug "DRY-RUN: Would pipx install: $package"
+        return 0
+    fi
+
+    pipx install "$package" 2>/dev/null
+}
+
+    local binary="${tool}"
+# Install via go install
+go_install() {
+    local tool="$1"
+    local go_pkg="${GO_PACKAGES[$tool]:-}"
+
+    [[ -z "$go_pkg" ]] && return 1
+
+    # Check for go
+    command -v go &>/dev/null || return 1
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        _debug "DRY-RUN: Would go install: $go_pkg"
+        return 0
+    fi
+
+    # Set GOPATH for non-root or use system path
+    local go_bin="${HOME}/go/bin"
+    if [[ $EUID -eq 0 && -n "${SUDO_USER:-}" ]]; then
+        local user_home
+        user_home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+        go_bin="${user_home}/go/bin"
+        sudo -u "$SUDO_USER" go install "$go_pkg" 2>/dev/null
+    else
+        go install "$go_pkg" 2>/dev/null
+    fi
+
+    # Copy to system path if installed (skip in user install mode)
+    if [[ $USER_INSTALL_MODE -eq 1 ]]; then
+        # In user mode, just verify the binary exists in user path
+        [[ -f "$go_bin/$binary" ]] && return 0
+        return 1
+    fi
+
+    # Copy to system path if installed
+    if [[ -f "$go_bin/$binary" ]]; then
+        install -m 755 "$go_bin/$binary" /usr/local/bin/ 2>/dev/null
+        return 0
+    fi
+
+    return 1
+}
+
+# Install via cargo
+cargo_install() {
+    local tool="$1"
+    local cargo_pkg="${CARGO_PACKAGES[$tool]:-$tool}"
+
+    command -v cargo &>/dev/null || return 1
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        _debug "DRY-RUN: Would cargo install: $cargo_pkg"
+        return 0
+    fi
+
+    # Install as user if running via sudo
+    if [[ $EUID -eq 0 && -n "${SUDO_USER:-}" ]]; then
+        sudo -u "$SUDO_USER" cargo install "$cargo_pkg" 2>/dev/null
+        local user_home
+        user_home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+        # Skip system copy in user install mode
+        if [[ $USER_INSTALL_MODE -eq 1 ]]; then
+            [[ -f "${user_home}/.cargo/bin/$tool" ]] && return 0
+            return 1
+        fi
+        if [[ -f "${user_home}/.cargo/bin/$tool" ]]; then
+            install -m 755 "${user_home}/.cargo/bin/$tool" /usr/local/bin/ 2>/dev/null
+            return 0
+        fi
+    else
+        cargo install "$cargo_pkg" 2>/dev/null
+        # In user mode, just verify the binary exists
+        if [[ $USER_INSTALL_MODE -eq 1 ]]; then
+            [[ -f "${HOME}/.cargo/bin/$tool" ]] && return 0
+            return 1
+        fi
+
+    return 1
+}
+
+# Install via gem (Ruby)
+gem_install() {
+    local package="$1"
+    [[ -z "$package" ]] && return 1
+
+    command -v gem &>/dev/null || return 1
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        _debug "DRY-RUN: Would gem install: $package"
+        return 0
+    fi
+
+    gem install "$package" --no-document 2>/dev/null
+}
+
+# Install from GitHub releases
+github_install() {
+    local tool="$1"
+    local repo="${GITHUB_REPOS[$tool]:-}"
+
+    [[ -z "$repo" ]] && return 1
+    command -v curl &>/dev/null || return 1
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        _debug "DRY-RUN: Would GitHub install: $repo"
+        return 0
+    fi
+
+    local api_url="https://api.github.com/repos/$repo/releases/latest"
+    local release_json
+
+    release_json=$(curl -sL --connect-timeout 10 "$api_url") || return 1
+
+    # Detect architecture
+    local arch
+    arch=$(uname -m)
+    local arch_pattern
+    case "$arch" in
+        x86_64)  arch_pattern="amd64\|x86_64\|linux64" ;;
+        aarch64) arch_pattern="arm64\|aarch64" ;;
+        armv7l)  arch_pattern="armv7\|arm\|armhf" ;;
+        *)       arch_pattern="$arch" ;;
+    esac
+
+    # Find download URL
+    local download_url
+    download_url=$(echo "$release_json" | \
+        grep -o '"browser_download_url":[[:space:]]*"[^"]*"' | \
+        sed 's/"browser_download_url":[[:space:]]*"\([^"]*\)"/\1/' | \
+        grep -iE "linux" | \
+        grep -iE "$arch_pattern" | \
+        grep -vE '\.sha256|\.sig|\.asc|\.txt|\.md' | \
+        head -1)
+
+    [[ -z "$download_url" ]] && return 1
+
+    local tmp_file="/tmp/${tool}_download_$$"
+    local tmp_dir="/tmp/${tool}_extract_$$"
+
+    curl -sL --connect-timeout 10 --max-time 120 "$download_url" -o "$tmp_file" || return 1
+
+    # Handle different archive types
+    case "$download_url" in
+        *.deb)
+            dpkg -i "$tmp_file" 2>/dev/null
+            apt-get install -f -y 2>/dev/null
+            ;;
+        *.rpm)
+            rpm -i "$tmp_file" 2>/dev/null || dnf install -y "$tmp_file" 2>/dev/null
+            ;;
+        *.tar.gz|*.tgz)
+            mkdir -p "$tmp_dir"
+            tar -xzf "$tmp_file" -C "$tmp_dir" 2>/dev/null
+            local binary
+            binary=$(find "$tmp_dir" -type f -executable -name "*${tool}*" 2>/dev/null | head -1)
+            [[ -z "$binary" ]] && binary=$(find "$tmp_dir" -type f -executable 2>/dev/null | head -1)
+            [[ -n "$binary" ]] && install -m 755 "$binary" "/usr/local/bin/$tool"
+            rm -rf "$tmp_dir"
+            ;;
+        *.zip)
+            mkdir -p "$tmp_dir"
+            unzip -q "$tmp_file" -d "$tmp_dir" 2>/dev/null
+            local binary
+            binary=$(find "$tmp_dir" -type f -executable 2>/dev/null | head -1)
+            [[ -n "$binary" ]] && install -m 755 "$binary" "/usr/local/bin/$tool"
+            rm -rf "$tmp_dir"
+            ;;
+        *)
+            # Assume raw binary
+            install -m 755 "$tmp_file" "/usr/local/bin/$tool"
+            ;;
+    esac
+
+    rm -f "$tmp_file"
+    command -v "$tool" &>/dev/null
+}
+
+# Install via snap
+snap_install() {
+    local package="$1"
+    [[ -z "$package" ]] && return 1
+
+    command -v snap &>/dev/null || return 1
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        _debug "DRY-RUN: Would snap install: $package"
+        return 0
+    fi
+
+    snap install "$package" 2>/dev/null || snap install "$package" --classic 2>/dev/null
+}
+
+# Install via flatpak
+flatpak_install() {
+    local package="$1"
+    [[ -z "$package" ]] && return 1
+
+    command -v flatpak &>/dev/null || return 1
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        _debug "DRY-RUN: Would flatpak install: $package"
+        return 0
+    fi
+
+    flatpak install -y flathub "$package" 2>/dev/null
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# TOOL VERIFICATION
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Binary name mapping (some tools have different binary names)
+get_binary_name() {
+    local tool="$1"
+
+    case "$tool" in
+        metasploit-framework|metasploit) echo "msfconsole" ;;
+        exploitdb) echo "searchsploit" ;;
+        john-the-ripper) echo "john" ;;
+        hcxtools) echo "hcxpcapngtool" ;;
+        theharvester) echo "theHarvester" ;;
+        netcat) echo "nc" ;;
+        proxychains-ng) echo "proxychains4" ;;
+        wireshark-cli) echo "tshark" ;;
+        *) echo "$tool" ;;
+    esac
+}
+
+# Check if tool is installed
+is_installed() {
+    local tool="$1"
+    local binary
+    binary=$(get_binary_name "$tool")
+
+    # Check standard paths
+    if command -v "$binary" &>/dev/null; then
+        return 0
+    fi
+
+    # Check additional paths
+    local paths=("/usr/local/bin" "$HOME/.local/bin" "$HOME/go/bin" "$HOME/.cargo/bin")
+    for p in "${paths[@]}"; do
+        [[ -x "$p/$binary" ]] && return 0
+    done
+
+    return 1
+}
+
+# Verify tool works (run --version or --help)
+verify_tool() {
+    local tool="$1"
+    local binary
+    binary=$(get_binary_name "$tool")
+
+    [[ $NO_VERIFY -eq 1 ]] && return 0
+
+    # Skip verification for tools that don't support --version/--help easily
+    case "$tool" in
+        metasploit*|maltego|burpsuite|wireshark)
+            # Just check binary exists
+            command -v "$binary" &>/dev/null && return 0
+            return 1
+            ;;
+    esac
+
+    # Try --version first, then --help, then -V
+    if command -v "$binary" &>/dev/null; then
+        timeout 5 "$binary" --version &>/dev/null && return 0
+        timeout 5 "$binary" --help &>/dev/null && return 0
+        timeout 5 "$binary" -V &>/dev/null && return 0
+        # If binary exists but none of above work, consider it installed
+        return 0
+    fi
+
+    return 1
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# MAIN INSTALLATION FUNCTION
+#═══════════════════════════════════════════════════════════════════════════════
+
+# Install a tool with fallback chain
+# Args: $1 = tool name
+# Returns: 0 on success, 1 on failure
+install_tool() {
+    local tool="$1"
+    [[ -z "$tool" ]] && return 1
+
+    # Already installed?
+    if is_installed "$tool" && [[ $FORCE_REINSTALL -eq 0 ]]; then
+        _skip "$tool ${C_GRAY}(already installed)${C_RESET}"
+        SKIPPED_TOOLS+=("$tool")
+        return 0
+    fi
+
+    _progress "Installing $tool..."
+
+    local method_used=""
+    local pkg=""
+
+    # METHOD 1: Native package manager
+    pkg=$(get_pkg_name "$tool")
+    if [[ -n "$pkg" ]]; then
+        if pkg_install "$pkg"; then
+            if is_installed "$tool"; then
+                method_used="$PKG_MANAGER"
+            fi
+        fi
+    fi
+
+    # METHOD 2: AUR (Arch-based only)
+    if [[ -z "$method_used" && -n "$AUR_HELPER" ]]; then
+        if aur_install "$tool"; then
+            if is_installed "$tool"; then
+                method_used="$AUR_HELPER"
+            fi
+        fi
+    fi
+
+    # METHOD 3: pip
+    if [[ -z "$method_used" ]]; then
+        local pip_pkg="${PIP_PACKAGES[$tool]:-}"
+        if [[ -n "$pip_pkg" ]] || [[ -z "$pkg" ]]; then
+            if pip_install "${pip_pkg:-$tool}"; then
+                if is_installed "$tool"; then
+                    method_used="pip"
+                fi
+            fi
+        fi
+    fi
+
+    # METHOD 4: Go install
+    if [[ -z "$method_used" ]]; then
+        if [[ -n "${GO_PACKAGES[$tool]:-}" ]]; then
+            if go_install "$tool"; then
+                if is_installed "$tool"; then
+                    method_used="go"
+                fi
+            fi
+        fi
+    fi
+
+    # METHOD 5: Cargo install
+    if [[ -z "$method_used" ]]; then
+        if [[ -n "${CARGO_PACKAGES[$tool]:-}" ]]; then
+            if cargo_install "$tool"; then
+                if is_installed "$tool"; then
+                    method_used="cargo"
+                fi
+            fi
+        fi
+    fi
+
+    # METHOD 6: GitHub release
+    if [[ -z "$method_used" ]]; then
+        if [[ -n "${GITHUB_REPOS[$tool]:-}" ]]; then
+            if github_install "$tool"; then
+                if is_installed "$tool"; then
+                    method_used="github"
+                fi
+            fi
+        fi
+    fi
+
+    # METHOD 7: Gem (Ruby)
+    if [[ -z "$method_used" ]]; then
+        case "$tool" in
+            wpscan)
+                if gem_install "$tool"; then
+                    if is_installed "$tool"; then
+                        method_used="gem"
+                    fi
+                fi
+                ;;
+        esac
+    fi
+
+    # METHOD 8: Snap/Flatpak (last resort)
+    if [[ -z "$method_used" ]]; then
+        if snap_install "$tool"; then
+            if is_installed "$tool"; then
+                method_used="snap"
+            fi
+        fi
+    fi
+
+    if [[ -z "$method_used" && "$OFFLINE_MODE" -eq 0 ]]; then
+        if flatpak_install "$tool"; then
+            if is_installed "$tool"; then
+                method_used="flatpak"
+            fi
+        fi
+    fi
+
+    # Check result
+    if [[ -n "$method_used" ]]; then
+        # Verify the tool actually works
+        if verify_tool "$tool"; then
+            _ok "$tool ${C_GRAY}($method_used)${C_RESET}"
+            INSTALLED_TOOLS+=("$tool")
+            INSTALL_METHODS[$tool]="$method_used"
+            return 0
+        else
+            _fail "$tool ${C_GRAY}(installed but verification failed)${C_RESET}"
+            FAILED_TOOLS+=("$tool:verify_failed")
+            return 1
+        fi
+    else
+        _fail "$tool ${C_GRAY}(no installation method available)${C_RESET}"
+
+        # Suggest distrobox on immutable systems
+        if [[ $IS_IMMUTABLE -eq 1 ]]; then
+            if command -v distrobox &>/dev/null; then
+                _info "${C_GRAY}Tip: Try installing in distrobox: ${C_CYAN}distrobox enter pentest${C_RESET}"
+            else
+                _info "${C_GRAY}Tip: Install distrobox for more package availability${C_RESET}"
+            fi
+        fi
+
+        FAILED_TOOLS+=("$tool:no_method")
+        return 1
+    fi
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# DEPENDENCY INSTALLATION
+#═══════════════════════════════════════════════════════════════════════════════
+
+install_base_deps() {
+    _info "Installing base dependencies..."
+
+    local base_deps=(git curl wget unzip jq)
+
+    for dep in "${base_deps[@]}"; do
+        if ! command -v "$dep" &>/dev/null; then
+            local pkg
+            pkg=$(get_pkg_name "$dep")
+            pkg_install "$pkg" 2>/dev/null
+        fi
+    done
+
+    # Install build tools
+    local build_pkg
+    build_pkg=$(get_pkg_name "build-essential")
+    if [[ -n "$build_pkg" ]]; then
+        # shellcheck disable=SC2086
+        pkg_install $build_pkg 2>/dev/null
+    fi
+
+    # Install pip if not present
+    if ! command -v pip3 &>/dev/null && ! command -v pip &>/dev/null; then
+        local pip_pkg
+        pip_pkg=$(get_pkg_name "python3-pip")
+        [[ -n "$pip_pkg" ]] && pkg_install "$pip_pkg" 2>/dev/null
+    fi
+
+    # Install Go if not present (many tools need it)
+    if ! command -v go &>/dev/null; then
+        local go_pkg
+        go_pkg=$(get_pkg_name "golang")
+        [[ -n "$go_pkg" ]] && pkg_install "$go_pkg" 2>/dev/null
+    fi
+
+    return 0
+}
+
+# Setup NixOS-specific configuration
+setup_nix_repos() {
+    # Check if nix channel is set up
+    if ! nix-channel --list | grep -q nixpkgs 2>/dev/null; then
+        _warn "No nix channel found. Adding nixpkgs channel..."
+        nix-channel --add https://nixos.org/channels/nixpkgs-unstable nixpkgs 2>/dev/null
+        nix-channel --update 2>/dev/null
+    fi
+
+    # Warn about unfree packages
+    _info "NixOS detected - unfree packages will be allowed for security tools"
+    _info "Some tools like hashcat may require unfree license acceptance"
+}
+
+# Setup additional repos for security tools
+setup_repos() {
+    case "$DISTRO_FAMILY" in
+        redhat)
+            # EPEL for RHEL/CentOS/Rocky/Alma
+            if [[ "$DISTRO" != "fedora" ]]; then
+                if ! rpm -q epel-release &>/dev/null 2>&1; then
+                    _info "Installing EPEL repository..."
+                    dnf install -y epel-release 2>/dev/null || \
+                    yum install -y epel-release 2>/dev/null
+                fi
+            fi
+            ;;
+        arch)
+            if [[ "$DISTRO" != "blackarch" ]]; then
+                _warn "For more security tools, consider adding BlackArch repo:"
+                _warn "  curl -O https://blackarch.org/strap.sh && sudo bash strap.sh"
+            fi
+            ;;
+        nix)
+            setup_nix_repos
+            ;;
+    esac
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# TOOL CATEGORIES
+#═══════════════════════════════════════════════════════════════════════════════
+
+declare -A CATEGORIES=(
+    [scanning]="nmap masscan rustscan zmap arp-scan netdiscover hping3 fping"
+    [wireless]="aircrack-ng reaver bully pixiewps wifite bettercap mdk3 mdk4 hostapd cowpatty hcxdumptool hcxtools kismet"
+    [web]="nikto sqlmap dirb gobuster ffuf wpscan whatweb nuclei httpx subfinder amass dirsearch"
+    [exploit]="metasploit-framework exploitdb crackmapexec"
+    [osint]="theharvester recon-ng maltego shodan exiftool whois"
+    [creds]="hashcat john hydra medusa ncrack"
+    [traffic]="tcpdump wireshark tshark ettercap dsniff ngrep"
+    [stress]="hping3 iperf3 siege"
+    [utils]="netcat socat proxychains-ng tmux tor"
+)
+
+# Essential tools (minimal install)
+ESSENTIALS="nmap masscan aircrack-ng hashcat john hydra nikto gobuster sqlmap tcpdump wireshark netdiscover arp-scan"
+
+#═══════════════════════════════════════════════════════════════════════════════
+# CATEGORY INSTALLATION
+#═══════════════════════════════════════════════════════════════════════════════
+
+install_category() {
+    local category="$1"
+    local tools="${CATEGORIES[$category]:-}"
+
+    if [[ -z "$tools" ]]; then
+        _fail "Unknown category: $category"
+        return 1
+    fi
+
+    echo
+    echo -e "    ${C_CYAN}━━━ Installing ${category^^} tools ━━━${C_RESET}"
+    echo
+
+    for tool in $tools; do
+        install_tool "$tool" || true
+    done
+
+    return 0
+}
+
+install_all() {
+    for category in scanning wireless web exploit osint creds traffic stress utils; do
+        install_category "$category" || true
+    done
+}
+
+install_essentials() {
+    echo
+    echo -e "    ${C_CYAN}━━━ Installing ESSENTIAL tools ━━━${C_RESET}"
+    echo
+
+    for tool in $ESSENTIALS; do
+        install_tool "$tool" || true
+    done
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# STATUS DISPLAY
+#═══════════════════════════════════════════════════════════════════════════════
+
+show_status() {
+    echo
+    echo -e "    ${C_CYAN}━━━ ARSENAL STATUS ━━━${C_RESET}"
+    echo
+
+    local total_installed=0
+    local total_missing=0
+
+    for category in "${!CATEGORIES[@]}"; do
+        local cat_installed=0
+        local cat_total=0
+        local cat_missing=()
+
+        for tool in ${CATEGORIES[$category]}; do
+            ((cat_total++))
+            if is_installed "$tool"; then
+                ((cat_installed++))
+                ((total_installed++))
+            else
+                cat_missing+=("$tool")
+                ((total_missing++))
+            fi
+        done
+
+        local pct=$((cat_installed * 100 / cat_total))
+        local color="$C_RED"
+        [[ $pct -ge 50 ]] && color="$C_YELLOW"
+        [[ $pct -eq 100 ]] && color="$C_GREEN"
+
+        printf "    ${C_CYAN}%-12s${C_RESET} %2d/%-2d ${color}%3d%%${C_RESET}" \
+            "${category^^}:" "$cat_installed" "$cat_total" "$pct"
+
+        if [[ ${#cat_missing[@]} -gt 0 && ${#cat_missing[@]} -le 3 ]]; then
+            echo -e "  ${C_GRAY}missing: ${cat_missing[*]}${C_RESET}"
+        elif [[ ${#cat_missing[@]} -gt 3 ]]; then
+            echo -e "  ${C_GRAY}missing: ${#cat_missing[@]} tools${C_RESET}"
+        else
+            echo
+        fi
+    done
+
+    echo
+    echo -e "    ${C_CYAN}════════════════════════════════════════${C_RESET}"
+    local total=$((total_installed + total_missing))
+    local total_pct=$((total_installed * 100 / total))
+    echo -e "    ${C_BOLD}TOTAL: ${total_installed}/${total} (${total_pct}%)${C_RESET}"
+    echo
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# SUMMARY DISPLAY
+#═══════════════════════════════════════════════════════════════════════════════
+
+show_summary() {
+    echo
+    echo -e "    ${C_CYAN}═══════════════════════════════════════════════════════════════${C_RESET}"
+    echo -e "                        ${C_BOLD}INSTALLATION SUMMARY${C_RESET}"
+    echo -e "    ${C_CYAN}═══════════════════════════════════════════════════════════════${C_RESET}"
+    echo
+
+    local n_installed=${#INSTALLED_TOOLS[@]}
+    local n_skipped=${#SKIPPED_TOOLS[@]}
+    local n_failed=${#FAILED_TOOLS[@]}
+
+    echo -e "    ${C_GREEN}[OK]${C_RESET}   Installed:  ${C_GREEN}${n_installed}${C_RESET}"
+    echo -e "    ${C_GRAY}[SKIP]${C_RESET} Skipped:    ${C_GRAY}${n_skipped}${C_RESET} ${C_GRAY}(already installed)${C_RESET}"
+    echo -e "    ${C_RED}[FAIL]${C_RESET} Failed:     ${C_RED}${n_failed}${C_RESET}"
+    echo
+
+    # Show installed tools with methods
+    if [[ $n_installed -gt 0 && $VERBOSE -eq 1 ]]; then
+        echo -e "    ${C_GREEN}Installed tools:${C_RESET}"
+        for tool in "${INSTALLED_TOOLS[@]}"; do
+            local method="${INSTALL_METHODS[$tool]:-unknown}"
+            echo -e "      ${C_GREEN}✓${C_RESET} $tool ${C_GRAY}($method)${C_RESET}"
+        done
+        echo
+    fi
+
+    # Show failed tools with hints
+    if [[ $n_failed -gt 0 ]]; then
+        echo -e "    ${C_RED}Failed tools:${C_RESET}"
+        for entry in "${FAILED_TOOLS[@]}"; do
+            local tool="${entry%%:*}"
+            local reason="${entry#*:}"
+            echo -e "      ${C_RED}✗${C_RESET} $tool ${C_GRAY}($reason)${C_RESET}"
+        done
+        echo
+
+        # Create manual guide
+        local guide_file="${HOME}/.voidwave/MANUAL_INSTALL.md"
+        mkdir -p "${HOME}/.voidwave"
+        create_manual_guide "$guide_file"
+        echo -e "    ${C_YELLOW}[!]${C_RESET} Manual installation guide: ${C_CYAN}${guide_file}${C_RESET}"
+        echo
+    fi
+
+    if [[ $n_failed -eq 0 ]]; then
+        echo -e "    ${C_GREEN}All tools installed successfully!${C_RESET}"
+    fi
+
+    echo
+    _info "Log file: $LOG_FILE"
+    echo
+}
+
+# Create manual installation guide for failed tools
+create_manual_guide() {
+    local guide_file="$1"
+
+    cat > "$guide_file" << EOF
+# VOIDWAVE Manual Installation Guide
+Generated: $(date '+%Y-%m-%d %H:%M:%S')
+System: ${DISTRO^} (${PKG_MANAGER})
+
+## Failed Tools
+
+EOF
+
+    for entry in "${FAILED_TOOLS[@]}"; do
+        local tool="${entry%%:*}"
+
+        echo "### $tool" >> "$guide_file"
+        echo '```bash' >> "$guide_file"
+
+        case "$tool" in
+            rustscan)
+                cat >> "$guide_file" << 'TOOLEOF'
+# Option 1: Cargo
+cargo install rustscan
+
+# Option 2: Download from GitHub
+# https://github.com/RustScan/RustScan/releases
+TOOLEOF
+                ;;
+            nuclei|httpx|subfinder)
+                echo "go install ${GO_PACKAGES[$tool]}" >> "$guide_file"
+                ;;
+            theharvester|shodan|crackmapexec)
+                echo "pip3 install ${PIP_PACKAGES[$tool]:-$tool} --user --break-system-packages" >> "$guide_file"
+                ;;
+            wpscan)
+                echo "gem install wpscan" >> "$guide_file"
+                ;;
+            metasploit*)
+                cat >> "$guide_file" << 'TOOLEOF'
+# Download installer:
+curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > msfinstall
+chmod +x msfinstall && ./msfinstall
+TOOLEOF
+                ;;
+            *)
+                echo "# Check your package manager or project documentation" >> "$guide_file"
+                ;;
+        esac
+
+        echo '```' >> "$guide_file"
+        echo >> "$guide_file"
+    done
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# ROOT/SUDO HANDLING
+#═══════════════════════════════════════════════════════════════════════════════
+
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        # On immutable systems, allow user-local installation
+        if [[ $IS_IMMUTABLE -eq 1 ]]; then
+            _warn "Running without root on immutable system - using user-local installation mode"
+            _info "Tools will be installed to ~/.local/bin, ~/go/bin, ~/.cargo/bin"
+            USER_INSTALL_MODE=1
+            return 0
+        fi
+
+        _fail "This installer requires root privileges"
+        _info "Run: sudo $0 $*"
+        exit 1
+    fi
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# PREFLIGHT CHECKS
+#═══════════════════════════════════════════════════════════════════════════════
+
+preflight_checks() {
+    _info "Running preflight checks..."
+
+    # Root check
+    check_root
+
+    # System detection
+    if ! detect_system; then
+        _fail "Could not detect supported package manager"
+        _info "Supported: apt, dnf, yum, pacman, zypper, apk, emerge, xbps, nix"
+        exit 1
+    fi
+
+    show_system_info
+
+    # Setup immutable system workarounds
+    setup_immutable_workarounds
+
+    # Setup repos
+    setup_repos
+
+    # Network check
+    if [[ $OFFLINE_MODE -eq 0 ]]; then
+        if ! ping -c 1 -W 3 8.8.8.8 &>/dev/null 2>&1; then
+            _warn "No internet connection detected - some installations may fail"
+        fi
+    fi
+
+    # Create directories
+    mkdir -p "$CACHE_DIR" "$(dirname "$LOG_FILE")" 2>/dev/null
+
+    # Update package lists
+    pkg_update
+
+    # Install base dependencies
+    install_base_deps
+
+    _ok "Preflight checks complete"
+    echo
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# INTERACTIVE MENU
+#═══════════════════════════════════════════════════════════════════════════════
+
+show_menu() {
+    while true; do
+        clear
+        echo
+        echo -e "    ${C_RED}╔═══════════════════════════════════════════════════════════╗${C_RESET}"
+        echo -e "    ${C_RED}║${C_RESET}           ${C_CYAN}VOIDWAVE UNIVERSAL INSTALLER${C_RESET} v${VERSION}          ${C_RED}║${C_RESET}"
+        echo -e "    ${C_RED}╚═══════════════════════════════════════════════════════════╝${C_RESET}"
+        echo
+        echo -e "    ${C_GRAY}[1]${C_RESET} Install ALL tools"
+        echo -e "    ${C_GRAY}[2]${C_RESET} Install essentials only"
+        echo
+        echo -e "    ${C_GRAY}[3]${C_RESET} Install SCANNING    ${C_GRAY}nmap, masscan, rustscan...${C_RESET}"
+        echo -e "    ${C_GRAY}[4]${C_RESET} Install WIRELESS    ${C_GRAY}aircrack-ng, wifite, bettercap...${C_RESET}"
+        echo -e "    ${C_GRAY}[5]${C_RESET} Install WEB         ${C_GRAY}nikto, sqlmap, gobuster, nuclei...${C_RESET}"
+        echo -e "    ${C_GRAY}[6]${C_RESET} Install EXPLOIT     ${C_GRAY}metasploit, searchsploit...${C_RESET}"
+        echo -e "    ${C_GRAY}[7]${C_RESET} Install CREDS       ${C_GRAY}hashcat, john, hydra...${C_RESET}"
+        echo -e "    ${C_GRAY}[8]${C_RESET} Install OSINT       ${C_GRAY}theharvester, recon-ng...${C_RESET}"
+        echo -e "    ${C_GRAY}[9]${C_RESET} Install TRAFFIC     ${C_GRAY}tcpdump, wireshark...${C_RESET}"
+        echo
+        echo -e "    ${C_GRAY}[S]${C_RESET} Show status"
+        echo -e "    ${C_GRAY}[Q]${C_RESET} Quit"
+        echo
+        echo -ne "    ${C_CYAN}▶${C_RESET} "
+        read -r choice
+
+        # Reset tracking arrays for fresh install
+        INSTALLED_TOOLS=()
+        FAILED_TOOLS=()
+        SKIPPED_TOOLS=()
+
+        case "$choice" in
+            1) preflight_checks; install_all; show_summary ;;
+            2) preflight_checks; install_essentials; show_summary ;;
+            3) preflight_checks; install_category "scanning"; show_summary ;;
+            4) preflight_checks; install_category "wireless"; show_summary ;;
+            5) preflight_checks; install_category "web"; show_summary ;;
+            6) preflight_checks; install_category "exploit"; show_summary ;;
+            7) preflight_checks; install_category "creds"; show_summary ;;
+            8) preflight_checks; install_category "osint"; show_summary ;;
+            9) preflight_checks; install_category "traffic"; show_summary ;;
+            [sS]) detect_system; show_status ;;
+            [qQ]) exit 0 ;;
+            *) _warn "Invalid option" ;;
+        esac
+
+        echo
+        echo -ne "    ${C_GRAY}Press Enter to continue...${C_RESET}"
+        read -r
+    done
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# USAGE
+#═══════════════════════════════════════════════════════════════════════════════
+
+show_usage() {
+    cat << EOF
+VOIDWAVE Universal Arsenal Installer v${VERSION}
+
+Usage: sudo $SCRIPT_NAME [options] [command]
+
+Commands:
+    all          Install all tools
+    essentials   Install essential tools only
+    scanning     Install scanning tools
+    wireless     Install wireless tools
+    web          Install web tools
+    exploit      Install exploit tools
+    creds        Install credential tools
+    osint        Install OSINT tools
+    traffic      Install traffic analysis tools
+    stress       Install stress testing tools
+    status       Show installation status
+    menu         Interactive menu (default)
+
+Options:
+    --dry-run    Show what would be installed without installing
+    --verbose    Show detailed output
+    --force      Reinstall already installed tools
+    --offline    Skip network-dependent installation methods
+    --no-verify  Skip tool verification after install
+    -h, --help   Show this help
+
+Examples:
+    sudo $SCRIPT_NAME                    # Interactive menu
+    sudo $SCRIPT_NAME all                # Install everything
+    sudo $SCRIPT_NAME essentials         # Quick setup
+    sudo $SCRIPT_NAME scanning wireless  # Multiple categories
+    sudo $SCRIPT_NAME --dry-run all      # Preview installation
+
+Supported Distributions:
+    Debian/Ubuntu/Kali/Parrot/Mint (apt)
+    Fedora/RHEL/Rocky/Alma/Silverblue/Kinoite (dnf/yum)
+    Arch/Manjaro/BlackArch/EndeavourOS (pacman + AUR)
+    SteamOS/Bazzite/ChimeraOS (pacman - Steam Deck)
+    openSUSE/Aeon/Kalpa (zypper)
+    Alpine/postmarketOS (apk)
+    Void Linux (xbps)
+    Gentoo (emerge)
+    NixOS (nix-env)
+    VanillaOS/blendOS (apt - immutable)
+    WSL (Windows Subsystem for Linux)
+
+EOF
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# MAIN
+#═══════════════════════════════════════════════════════════════════════════════
+
+main() {
+    local commands=()
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run)
+                DRY_RUN=1
+                _info "Dry-run mode enabled"
+                shift
+                ;;
+            --verbose|-v)
+                VERBOSE=1
+                shift
+                ;;
+            --force)
+                FORCE_REINSTALL=1
+                shift
+                ;;
+            --offline)
+                OFFLINE_MODE=1
+                shift
+                ;;
+            --no-verify)
+                NO_VERIFY=1
+                shift
+                ;;
+            -h|--help)
+                show_usage
+                exit 0
+                ;;
+            -*)
+                _fail "Unknown option: $1"
+                show_usage
+                exit 1
+                ;;
+            *)
+                commands+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    # Default to menu if no commands
+    if [[ ${#commands[@]} -eq 0 ]]; then
+        commands=("menu")
+    fi
+
+    # Process commands
+    for cmd in "${commands[@]}"; do
+        case "$cmd" in
+            all)
+                preflight_checks
+                install_all
+                show_summary
+                ;;
+            essentials)
+                preflight_checks
+                install_essentials
+                show_summary
+                ;;
+            scanning|wireless|web|exploit|osint|creds|traffic|stress|utils)
+                preflight_checks
+                install_category "$cmd"
+                show_summary
+                ;;
+            status)
+                detect_system
+                show_status
+                ;;
+            menu)
+                show_menu
+                ;;
+            *)
+                _fail "Unknown command: $cmd"
+                show_usage
+                exit 1
+                ;;
+        esac
+    done
+}
+
+main "$@"

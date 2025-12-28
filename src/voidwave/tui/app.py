@@ -1,11 +1,18 @@
 """VOIDWAVE Textual Application."""
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Footer, Header
 
 from voidwave.core.logging import get_logger
+from voidwave.orchestration.events import event_bus
+from voidwave.orchestration.control import ExecutionController
+from voidwave.tui.integration import TUIEventBridge
+
+if TYPE_CHECKING:
+    from voidwave.orchestration.events import VoidwaveEventBus
 
 logger = get_logger(__name__)
 
@@ -39,6 +46,11 @@ class VoidwaveApp(App):
         super().__init__()
         self._dark_mode = True
 
+        # Initialize event bus integration
+        self.event_bus: VoidwaveEventBus = event_bus
+        self.execution_controller = ExecutionController(self.event_bus)
+        self._event_bridge: TUIEventBridge | None = None
+
     def compose(self) -> ComposeResult:
         """Compose the application layout."""
         yield Header()
@@ -50,6 +62,11 @@ class VoidwaveApp(App):
     async def on_mount(self) -> None:
         """Handle application mount."""
         logger.info("VOIDWAVE TUI started")
+
+        # Connect event bridge to wire events to widgets
+        self._event_bridge = TUIEventBridge(self, self.event_bus)
+        self._event_bridge.connect()
+        logger.info("Event bridge connected")
 
         # Show first-run wizard if needed (check if we have database initialized)
         try:
@@ -70,6 +87,17 @@ class VoidwaveApp(App):
             await self.push_screen(FirstRunWizard())
         except ImportError:
             logger.warning("First-run wizard not available")
+
+    async def on_unmount(self) -> None:
+        """Handle application unmount."""
+        # Disconnect event bridge
+        if self._event_bridge:
+            self._event_bridge.disconnect()
+            logger.info("Event bridge disconnected")
+
+        # Stop any running tools
+        await self.execution_controller.stop_all(timeout=3.0)
+        logger.info("VOIDWAVE TUI shutdown complete")
 
     # Action handlers
     def action_quit(self) -> None:

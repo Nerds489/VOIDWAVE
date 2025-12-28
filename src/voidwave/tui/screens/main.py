@@ -154,10 +154,20 @@ class MainScreen(Screen):
     async def _stop_all_tools(self) -> None:
         """Stop all running tools."""
         output = self.query_one("#tool-output", ToolOutput)
-        output.write_info("Stop all tools requested")
-        # Event bus integration will be added later
-        # from voidwave.orchestration.events import event_bus, Events
-        # await event_bus.emit(Events.STOP_ALL_TOOLS)
+        output.write_info("Stopping all running tools...")
+
+        # Use the execution controller to stop all tools
+        results = await self.app.execution_controller.stop_all()
+
+        cancelled = results.get("cancelled", 0)
+        failed = results.get("failed", 0)
+
+        if cancelled > 0:
+            output.write_success(f"Stopped {cancelled} tool(s)")
+        if failed > 0:
+            output.write_warning(f"Failed to stop {failed} tool(s)")
+        if cancelled == 0 and failed == 0:
+            output.write_info("No tools were running")
 
     # Menu shortcut actions
     def action_menu_1(self) -> None:

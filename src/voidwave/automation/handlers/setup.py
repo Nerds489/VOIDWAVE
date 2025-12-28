@@ -5,6 +5,22 @@ from pathlib import Path
 from typing import Any
 
 from voidwave.automation.labels import AUTO_REGISTRY
+from voidwave.core.constants import (
+    VOIDWAVE_CERTS_DIR,
+    VOIDWAVE_CONFIG_DIR,
+    VOIDWAVE_HOME,
+    VOIDWAVE_LOG_DIR,
+    VOIDWAVE_LOOT_DIR,
+    VOIDWAVE_PORTALS_DIR,
+    VOIDWAVE_REPORTS_DIR,
+    VOIDWAVE_SCANS_DIR,
+    VOIDWAVE_SESSIONS_DIR,
+    VOIDWAVE_TEMP_DIR,
+    VOIDWAVE_TEMPLATES_DIR,
+    VOIDWAVE_WIFI_CAPTURES_DIR,
+    VOIDWAVE_WIRED_CAPTURES_DIR,
+    VOIDWAVE_WORDLISTS_DIR,
+)
 
 
 class AutoSetupHandler:
@@ -54,41 +70,40 @@ class AutoSetupHandler:
 
     async def _setup_directories(self) -> bool:
         """Create the VOIDWAVE directory structure."""
-        base = Path("/voidwave")
         directories = [
-            "logs",
-            "reports",
-            "captures/wifi",
-            "captures/wired",
-            "loot",
-            "scans",
-            "portals",
-            "certs",
-            "wordlists",
-            "templates",
-            "sessions",
-            "configs",
-            "temp",
+            VOIDWAVE_LOG_DIR,
+            VOIDWAVE_REPORTS_DIR,
+            VOIDWAVE_WIFI_CAPTURES_DIR,
+            VOIDWAVE_WIRED_CAPTURES_DIR,
+            VOIDWAVE_LOOT_DIR,
+            VOIDWAVE_SCANS_DIR,
+            VOIDWAVE_PORTALS_DIR,
+            VOIDWAVE_CERTS_DIR,
+            VOIDWAVE_WORDLISTS_DIR,
+            VOIDWAVE_TEMPLATES_DIR,
+            VOIDWAVE_SESSIONS_DIR,
+            VOIDWAVE_CONFIG_DIR,
+            VOIDWAVE_TEMP_DIR,
         ]
 
         try:
             for dir_path in directories:
-                (base / dir_path).mkdir(parents=True, exist_ok=True)
+                dir_path.mkdir(parents=True, exist_ok=True)
             return True
         except PermissionError:
             return False
 
     async def _setup_config(self) -> bool:
         """Create default configuration file."""
-        config_path = Path("/voidwave/configs/settings.toml")
+        config_path = VOIDWAVE_CONFIG_DIR / "settings.toml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
-        default_config = '''# VOIDWAVE Configuration
+        default_config = f'''# VOIDWAVE Configuration
 
 [general]
 theme = "dark"
 log_level = "INFO"
-output_dir = "/voidwave"
+output_dir = "{VOIDWAVE_HOME}"
 
 [wireless]
 default_channel = 6
@@ -100,7 +115,7 @@ default_timeout = 300
 max_threads = 50
 
 [credentials]
-wordlist = "/voidwave/wordlists/rockyou.txt"
+wordlist = "{VOIDWAVE_WORDLISTS_DIR}/rockyou.txt"
 hash_mode = "auto"
 
 [reporting]
@@ -116,7 +131,7 @@ include_screenshots = true
 
     async def _setup_certs(self) -> bool:
         """Generate self-signed certificates."""
-        cert_dir = Path("/voidwave/certs")
+        cert_dir = VOIDWAVE_CERTS_DIR
         cert_dir.mkdir(parents=True, exist_ok=True)
 
         # Generate CA certificate
@@ -146,7 +161,7 @@ include_screenshots = true
 
     async def _setup_portal(self) -> bool:
         """Generate default captive portal assets."""
-        portal_dir = Path("/voidwave/portals/default")
+        portal_dir = VOIDWAVE_PORTALS_DIR / "default"
         portal_dir.mkdir(parents=True, exist_ok=True)
 
         # index.html
@@ -188,7 +203,7 @@ $password = $_POST['password'] ?? '';
 $ip = $_SERVER['REMOTE_ADDR'] ?? '';
 $time = date('Y-m-d H:i:s');
 
-$log = "/voidwave/loot/portal_captures.txt";
+$log = "{VOIDWAVE_LOOT_DIR}/portal_captures.txt";
 $entry = "[$time] IP: $ip | Email: $email | Password: $password\\n";
 file_put_contents($log, $entry, FILE_APPEND);
 
@@ -218,7 +233,7 @@ header("Location: success.html");
 
     async def _setup_hostapd(self) -> bool:
         """Create hostapd configuration."""
-        config_path = Path("/voidwave/configs/hostapd.conf")
+        config_path = VOIDWAVE_CONFIG_DIR / "hostapd.conf"
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
         config = '''interface=wlan0
@@ -241,7 +256,7 @@ wpa=0
 
     async def _setup_dnsmasq(self) -> bool:
         """Create dnsmasq configuration."""
-        config_path = Path("/voidwave/configs/dnsmasq.conf")
+        config_path = VOIDWAVE_CONFIG_DIR / "dnsmasq.conf"
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
         config = '''interface=wlan0

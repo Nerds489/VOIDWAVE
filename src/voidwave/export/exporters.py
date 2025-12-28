@@ -498,11 +498,26 @@ class HtmlExporter(Exporter):
     def _calculate_duration(self, session: dict) -> str:
         """Calculate session duration."""
         try:
-            start = session.get("created_at", "")
-            end = session.get("completed_at", "")
-            if start and end:
-                # Parse and calculate
-                return "N/A"
+            start_str = session.get("created_at", "")
+            end_str = session.get("completed_at", "")
+            if start_str and end_str:
+                # Try common ISO formats
+                for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
+                    try:
+                        start = datetime.strptime(start_str[:19], fmt[:19].replace(".%f", ""))
+                        end = datetime.strptime(end_str[:19], fmt[:19].replace(".%f", ""))
+                        delta = end - start
+                        total_seconds = int(delta.total_seconds())
+                        hours, remainder = divmod(total_seconds, 3600)
+                        minutes, seconds = divmod(remainder, 60)
+                        if hours > 0:
+                            return f"{hours}h {minutes}m"
+                        elif minutes > 0:
+                            return f"{minutes}m {seconds}s"
+                        else:
+                            return f"{seconds}s"
+                    except ValueError:
+                        continue
         except Exception:
             pass
         return "N/A"

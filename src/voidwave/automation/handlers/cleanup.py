@@ -5,6 +5,9 @@ from dataclasses import dataclass, field
 from typing import Callable, Any
 
 from voidwave.automation.labels import AUTO_REGISTRY
+from voidwave.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -65,7 +68,9 @@ class AutoCleanupHandler:
                 result = action.action()
                 if asyncio.iscoroutine(result):
                     await result
-            except Exception:
+                logger.debug(f"Cleanup action completed: {action.name}")
+            except Exception as e:
+                logger.warning(f"Cleanup action failed: {action.name}: {e}")
                 success = False
 
         return success

@@ -4,6 +4,7 @@ import asyncio
 import shutil
 from typing import Any
 
+from voidwave.core.logging import get_logger
 from voidwave.automation.engine import (
     Requirement,
     RequirementStatus,
@@ -11,6 +12,8 @@ from voidwave.automation.engine import (
 )
 from voidwave.automation.requirements import ATTACK_REQUIREMENTS
 from voidwave.automation.labels import AUTO_REGISTRY
+
+logger = get_logger(__name__)
 
 
 class PreflightChecker:
@@ -85,8 +88,8 @@ class PreflightChecker:
             met = await asyncio.to_thread(req.check)
             if met:
                 return RequirementStatus.MET
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Requirement check failed for {req.name}: {e}")
 
         # Check alternatives (for tools)
         for alt_name in req.alternatives:
@@ -127,15 +130,15 @@ class PreflightChecker:
                     handler = handler_class()
                     if await handler.can_fix():
                         return await handler.fix()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"AUTO-* handler {req.auto_label} failed for {req.name}: {e}")
 
         # Try requirement's own fix method
         if req.fix:
             try:
                 return await asyncio.to_thread(req.fix)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Fix method failed for {req.name}: {e}")
 
         return False
 

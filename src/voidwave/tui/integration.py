@@ -250,7 +250,7 @@ class TUIEventBridge:
             panel.update_task(data)
         except Exception:
             # Progress panel may not exist in current screen
-            pass
+            logger.debug("Progress panel not available in current screen")
 
     def _update_status_panel(self, event_type: str, data: dict) -> None:
         """Update the StatusPanel widget."""
@@ -261,7 +261,7 @@ class TUIEventBridge:
             panel._update_status()
         except Exception:
             # Status panel may not exist in current screen
-            pass
+            logger.debug("Status panel not available in current screen")
 
     def _update_target_tree(self, node_type: str, data: dict) -> None:
         """Update the TargetTree widget."""
@@ -272,7 +272,7 @@ class TUIEventBridge:
             tree.add_node(node_type, data)
         except Exception:
             # Target tree may not exist in current screen
-            pass
+            logger.debug("Target tree not available in current screen")
 
     def _update_wireless_table(self, item_type: str, data: dict) -> None:
         """Update wireless network/client tables."""

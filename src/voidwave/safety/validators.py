@@ -63,6 +63,36 @@ def validate_port(port: int | str) -> int:
         raise ValueError(f"Invalid port: {port}") from e
 
 
+def validate_port_range(port_range: str) -> tuple[int, int]:
+    """Validate port range (e.g., '1-1000', '80', '22-443').
+
+    Args:
+        port_range: Port range string to validate
+
+    Returns:
+        Tuple of (start_port, end_port)
+
+    Raises:
+        ValueError: If port range is invalid
+    """
+    if "-" in port_range:
+        parts = port_range.split("-", 1)
+        if len(parts) != 2:
+            raise ValueError(f"Invalid port range format: {port_range}")
+        try:
+            start = validate_port(parts[0].strip())
+            end = validate_port(parts[1].strip())
+        except ValueError as e:
+            raise ValueError(f"Invalid port range: {port_range}") from e
+
+        if start > end:
+            raise ValueError(f"Start port must be <= end port: {port_range}")
+        return start, end
+    else:
+        port = validate_port(port_range.strip())
+        return port, port
+
+
 def validate_mac(mac: str) -> str:
     """Validate MAC address.
 
@@ -83,6 +113,24 @@ def validate_mac(mac: str) -> str:
 
     # Format with colons
     return ":".join(mac_clean[i : i + 2] for i in range(0, 12, 2))
+
+
+def validate_bssid(bssid: str) -> str:
+    """Validate BSSID (wireless access point MAC address).
+
+    Args:
+        bssid: BSSID string to validate
+
+    Returns:
+        Validated BSSID string (normalized to lowercase with colons)
+
+    Raises:
+        ValueError: If BSSID is invalid
+    """
+    try:
+        return validate_mac(bssid)
+    except ValueError:
+        raise ValueError(f"Invalid BSSID: {bssid}")
 
 
 def validate_hostname(hostname: str) -> str:

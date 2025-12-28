@@ -1,6 +1,9 @@
 """Base class for external tool wrappers."""
 import asyncio
+import os
+import signal
 import shutil
+import time
 from abc import abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -90,8 +93,6 @@ class BaseToolWrapper(ToolPlugin):
                 "command": " ".join(full_command),
             },
         )
-
-        import time
 
         self._execution.started_at = time.time()
 
@@ -206,9 +207,6 @@ class BaseToolWrapper(ToolPlugin):
     async def cancel(self) -> None:
         """Cancel the running tool."""
         if self._current_process is not None:
-            import os
-            import signal
-
             try:
                 # Kill process group
                 pgid = os.getpgid(self._current_process.pid)

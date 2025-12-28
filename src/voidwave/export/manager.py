@@ -1,9 +1,17 @@
 """Export manager for session data and reports."""
 
-import os
 from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass
+
+from voidwave.core.constants import (
+    VOIDWAVE_EXPORTS_DIR,
+    VOIDWAVE_LOOT_DIR,
+    VOIDWAVE_REPORTS_DIR,
+    VOIDWAVE_SCANS_DIR,
+    VOIDWAVE_WIFI_CAPTURES_DIR,
+)
+from voidwave.core.logging import get_logger
 
 from .exporters import (
     ExportResult,
@@ -14,38 +22,37 @@ from .exporters import (
     MarkdownExporter,
 )
 
+logger = get_logger(__name__)
+
 
 @dataclass
 class FileNamer:
     """Consistent file naming across the application."""
-
-    # Use XDG-compliant paths
-    BASE_DIR: Path = Path(os.path.expanduser("~/.local/share/voidwave"))
 
     @classmethod
     def capture(cls, session_id: int, bssid: str, capture_type: str) -> Path:
         """Generate capture file path."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_bssid = bssid.replace(":", "")
-        return cls.BASE_DIR / "captures" / "wifi" / f"{timestamp}_{safe_bssid}.{capture_type}"
+        return VOIDWAVE_WIFI_CAPTURES_DIR / f"{timestamp}_{safe_bssid}.{capture_type}"
 
     @classmethod
     def scan(cls, session_id: int, tool: str, target: str) -> Path:
         """Generate scan output path."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_target = target.replace("/", "_").replace(":", "_")
-        return cls.BASE_DIR / "scans" / tool / f"{timestamp}_{safe_target}"
+        return VOIDWAVE_SCANS_DIR / tool / f"{timestamp}_{safe_target}"
 
     @classmethod
     def report(cls, session_id: int, format_type: str) -> Path:
         """Generate report path."""
-        return cls.BASE_DIR / "reports" / f"session_{session_id:03d}" / f"report.{format_type}"
+        return VOIDWAVE_REPORTS_DIR / f"session_{session_id:03d}" / f"report.{format_type}"
 
     @classmethod
     def loot_export(cls, session_id: int) -> Path:
         """Generate loot export path."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return cls.BASE_DIR / "loot" / "exports" / f"export_{session_id}_{timestamp}.json"
+        return VOIDWAVE_LOOT_DIR / "exports" / f"export_{session_id}_{timestamp}.json"
 
 
 class ExportManager:
@@ -125,7 +132,8 @@ class ExportManager:
                 try:
                     data = await self.loot.retrieve(item["id"])
                     decrypted.append(data)
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Failed to decrypt loot item {item.get('id')}: {e}")
                     decrypted.append(item)
         else:
             decrypted = []
@@ -155,7 +163,7 @@ class ExportManager:
         else:
             targets = []
 
-        path = FileNamer.BASE_DIR / "exports" / f"targets_{session_id}.{format_type}"
+        path = VOIDWAVE_EXPORTS_DIR / f"targets_{session_id}.{format_type}"
         exporter_class = self.EXPORTERS.get(format_type, JsonExporter)
         exporter = exporter_class()
 
@@ -179,7 +187,7 @@ class ExportManager:
         """
         exporter_class = self.EXPORTERS.get(format_type, JsonExporter)
         exporter = exporter_class()
-        path = FileNamer.BASE_DIR / "exports" / f"{filename}.{exporter.format_name}"
+        path = VOIDWAVE_EXPORTS_DIR / f"{filename}.{exporter.format_name}"
 
         return await exporter.export(data, path)
 
@@ -203,36 +211,37 @@ class ExportManager:
                 session = await self.db.fetch_one(
                     "SELECT * FROM sessions WHERE id = ?", (session_id,)
                 ) or {}
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Failed to fetch session {session_id}: {e}")
                 session = {"id": session_id, "name": f"Session {session_id}"}
 
             try:
                 targets = await self.db.fetch_all(
                     "SELECT * FROM targets WHERE session_id = ?", (session_id,)
                 ) or []
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to fetch targets for session {session_id}: {e}")
 
             try:
                 tool_runs = await self.db.fetch_all(
                     "SELECT * FROM tool_executions WHERE session_id = ?", (session_id,)
                 ) or []
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to fetch tool executions for session {session_id}: {e}")
 
             try:
                 audit = await self.db.fetch_all(
                     "SELECT * FROM audit_log WHERE session_id = ? ORDER BY timestamp",
                     (session_id,)
                 ) or []
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to fetch audit log for session {session_id}: {e}")
 
         if self.loot:
             try:
                 loot = await self.loot.list_by_session(session_id) or []
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to fetch loot for session {session_id}: {e}")
 
         return {
             "session": session,

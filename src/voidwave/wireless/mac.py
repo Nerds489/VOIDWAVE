@@ -44,8 +44,8 @@ async def get_current_mac(interface: str) -> str | None:
         address_path = Path(f"/sys/class/net/{interface}/address")
         if address_path.exists():
             return address_path.read_text().strip()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to read MAC from sysfs for {interface}: {e}")
 
     # Fallback to ip command
     try:
@@ -62,8 +62,8 @@ async def get_current_mac(interface: str) -> str | None:
         match = re.search(r"link/ether\s+([0-9a-f:]{17})", stdout.decode())
         if match:
             return match.group(1)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to get MAC via ip command for {interface}: {e}")
 
     return None
 
@@ -83,8 +83,8 @@ async def get_permanent_mac(interface: str) -> str | None:
         match = re.search(r"Permanent address:\s+([0-9a-f:]{17})", stdout.decode())
         if match:
             return match.group(1)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to get permanent MAC for {interface}: {e}")
 
     return None
 
@@ -126,8 +126,8 @@ async def change_mac(
             try:
                 await _run_ip_command(["link", "set", interface, "address", original_mac])
                 await _run_ip_command(["link", "set", interface, "up"])
-            except Exception:
-                pass
+            except Exception as restore_err:
+                logger.warning(f"Failed to restore original MAC on {interface}: {restore_err}")
         raise
 
 

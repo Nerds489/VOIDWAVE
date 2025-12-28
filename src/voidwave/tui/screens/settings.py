@@ -542,24 +542,29 @@ class SettingsScreen(Screen):
         # API key entries
         for service in APIService:
             info = API_SERVICES.get(service)
+            if info is None:
+                continue  # Skip services without metadata
+
             has_key = api_key_manager.has_key(service)
 
             status_text = "[green]Configured[/]" if has_key else "[dim]Not set[/]"
 
             panel.mount(Label(f"[bold]{info.display_name}[/] - {info.description}", classes="settings-label"))
 
-            with Horizontal(classes="api-key-row"):
-                panel.mount(
-                    Input(
-                        value="••••••••" if has_key else "",
-                        placeholder="Enter API key",
-                        password=True,
-                        id=f"api-key-{service.value}",
-                    )
-                )
-                panel.mount(Button("Set", id=f"api-set-{service.value}"))
-                panel.mount(Button("Clear", id=f"api-clear-{service.value}", variant="warning"))
-                panel.mount(Static(status_text, classes="api-key-status"))
+            # Create row container with children properly
+            row = Horizontal(
+                Input(
+                    value="••••••••" if has_key else "",
+                    placeholder="Enter API key",
+                    password=True,
+                    id=f"api-key-{service.value}",
+                ),
+                Button("Set", id=f"api-set-{service.value}"),
+                Button("Clear", id=f"api-clear-{service.value}", variant="warning"),
+                Static(status_text, classes="api-key-status"),
+                classes="api-key-row",
+            )
+            panel.mount(row)
 
     def _compose_path_settings(self, panel: ScrollableContainer) -> None:
         """Compose path settings form."""

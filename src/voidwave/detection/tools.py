@@ -855,8 +855,9 @@ class ToolRegistry:
         if name not in self._cache:
             defn = self.TOOL_DEFINITIONS.get(name)
             if defn:
+                # Use the binary name from definition, not the registry key
                 self._cache[name] = ToolInfo.detect(
-                    name,
+                    defn.name,
                     version_flag=defn.version_flag,
                     category=defn.category,
                     description=defn.description,

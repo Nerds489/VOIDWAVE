@@ -228,11 +228,13 @@ class StatusScreen(Screen):
                 f"[cyan]Python:[/] {platform.python_version()}",
             ]
 
-            # Check if running as root
-            if os.geteuid() == 0:
+            # Check if running as root (POSIX only)
+            if hasattr(os, "geteuid") and os.geteuid() == 0:
                 info_lines.append("[green]Running as root[/]")
-            else:
+            elif hasattr(os, "geteuid"):
                 info_lines.append("[yellow]Not running as root[/]")
+            else:
+                info_lines.append("[dim]Root check not available[/]")
 
             info_widget.update("\n".join(info_lines))
 
@@ -303,31 +305,29 @@ class StatusScreen(Screen):
         self._write_output("[cyan]Running quick check...[/]")
 
         try:
+            self._refresh_tool_views()
             summary = tool_registry.get_summary()
-            self._update_summary(summary)
-
-            # Update category panels
-            for category in ToolCategory:
-                tools = {}
-                for name in tool_registry.get_tools_in_category(category):
-                    tools[name] = tool_registry.check(name)
-
-                try:
-                    panel = self.query_one(f"CategoryPanel", CategoryPanel)
-                    for p in self.query(CategoryPanel):
-                        if p.category == category:
-                            p.update_tools(tools)
-                            break
-                except Exception:
-                    pass
-
             self._write_output(
                 f"[green]Quick check complete.[/] "
                 f"Installed: {summary['installed']}, Missing: {summary['missing']}"
             )
-
         except Exception as e:
             self._write_output(f"[red]Error during check: {e}[/]")
+
+    def _refresh_tool_views(self) -> None:
+        """Refresh summary and category panels from current registry state."""
+        summary = tool_registry.get_summary()
+        self._update_summary(summary)
+
+        for category in ToolCategory:
+            tools: dict[str, ToolInfo] = {}
+            for name in tool_registry.get_tools_in_category(category):
+                tools[name] = tool_registry.check(name)
+
+            for panel in self.query(CategoryPanel):
+                if panel.category == category:
+                    panel.update_tools(tools)
+                    break
 
     async def _run_full_check(self) -> None:
         """Run a full check with progress updates."""
@@ -346,22 +346,9 @@ class StatusScreen(Screen):
                 if i % 10 == 0:
                     await self.app.refresh()
 
-            # Update displays
-            summary = tool_registry.get_summary()
-            self._update_summary(summary)
-
-            # Update category panels
-            for category in ToolCategory:
-                tools_dict = {}
-                for name in tool_registry.get_tools_in_category(category):
-                    tools_dict[name] = tool_registry.check(name)
-
-                for panel in self.query(CategoryPanel):
-                    if panel.category == category:
-                        panel.update_tools(tools_dict)
-                        break
-
             self._update_progress(0, 0)
+            self._refresh_tool_views()
+            summary = tool_registry.get_summary()
             self._write_output(
                 f"[green]Full check complete.[/] "
                 f"Installed: {summary['installed']}, Missing: {summary['missing']}"
@@ -427,8 +414,7 @@ class StatusScreen(Screen):
 
             # Refresh displays
             self._update_progress(0, 0)
-            await self._run_quick_check()
-
+            self._refresh_tool_views()
             self._write_output(
                 f"[bold]Installation complete.[/] "
                 f"[green]Success: {success_count}[/], [red]Failed: {fail_count}[/]"

@@ -20,10 +20,9 @@ class APIService(str, Enum):
     SHODAN = "shodan"
     CENSYS = "censys"
     VIRUSTOTAL = "virustotal"
-    HUNTER = "hunter"
+    HUNTER = "hunter"  # Hunter.io
     SECURITYTRAILS = "securitytrails"
     WHOISXML = "whoisxml"
-    HUNTERIO = "hunterio"
     WPSCAN = "wpscan"
     OPENAI = "openai"
     ANTHROPIC = "anthropic"

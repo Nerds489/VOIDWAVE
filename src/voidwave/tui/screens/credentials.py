@@ -27,6 +27,7 @@ from textual.widgets import (
 from voidwave.config.settings import get_settings
 from voidwave.core.logging import get_logger
 from voidwave.orchestration.events import Events
+from voidwave.tui.helpers.preflight_runner import PreflightRunner
 
 if TYPE_CHECKING:
     pass
@@ -162,6 +163,7 @@ class CredentialsScreen(Screen):
         self._crack_task: asyncio.Task | None = None
         self._current_job: CrackJob | None = None
         self._cracked_passwords: list[tuple[str, str]] = []
+        self._preflight: PreflightRunner | None = None
 
     def compose(self) -> ComposeResult:
         settings = get_settings()
@@ -264,6 +266,7 @@ class CredentialsScreen(Screen):
 
     async def on_mount(self) -> None:
         """Initialize screen."""
+        self._preflight = PreflightRunner(self.app)
         self._setup_tables()
         self._subscribe_events()
         self._load_potfile()
@@ -393,6 +396,16 @@ class CredentialsScreen(Screen):
             self._write_output("[yellow]Cracking already in progress[/]")
             return
 
+        # Prepare hashcat - this handles tool check, wordlist, etc.
+        ctx = await self._preflight.prepare_tool("hashcat")
+
+        if not ctx.ready:
+            self._write_output(f"[red]{ctx.error}[/]")
+            return
+
+        # Use fallback tool name if needed
+        tool_name = ctx.tool
+
         # Get hash input
         hash_input = self.query_one("#hash-input", TextArea).text.strip()
         hash_file = self.query_one("#input-hash-file", Input).value.strip()
@@ -401,19 +414,30 @@ class CredentialsScreen(Screen):
             self._write_output("[red]Please enter hashes or specify a hash file[/]")
             return
 
+        # Use wordlist from preflight if available
+        if ctx.wordlist:
+            wordlist_input = self.query_one("#input-wordlist", Input)
+            wordlist_input.value = ctx.wordlist
+
         self._cracking = True
-        self._write_output("[green]Starting cracking session...[/]")
+        self._write_output(f"[green]Starting cracking session with {tool_name}...[/]")
         self._update_progress("Starting", 0, "--", 0, 0)
 
-        self._crack_task = asyncio.create_task(self._run_crack(hash_input, hash_file))
+        self._crack_task = asyncio.create_task(self._run_crack(hash_input, hash_file, tool_name))
 
-    async def _run_crack(self, hash_input: str, hash_file: str) -> None:
+    async def _run_crack(self, hash_input: str, hash_file: str, tool_name: str = "hashcat") -> None:
         """Run the cracking process."""
         try:
-            from voidwave.tools.hashcat import HashcatTool
             import tempfile
 
-            tool = HashcatTool()
+            # Use appropriate tool
+            if tool_name == "john":
+                from voidwave.tools.john import JohnTool
+                tool = JohnTool()
+            else:
+                from voidwave.tools.hashcat import HashcatTool
+                tool = HashcatTool()
+
             await tool.initialize()
 
             # Build options

@@ -139,7 +139,7 @@ class ExecutionController:
                     results["failed"] += 1
 
             # Emit completion event
-            await self.bus.emit(
+            self.bus.emit(
                 Events.STATUS_UPDATE,
                 {
                     "action": "stop_all_completed",
@@ -192,7 +192,7 @@ class ExecutionController:
                 await process.wait()
 
             # Emit event
-            await self.bus.emit(
+            self.bus.emit(
                 Events.TOOL_FAILED,
                 {
                     "tool": running.tool_name,

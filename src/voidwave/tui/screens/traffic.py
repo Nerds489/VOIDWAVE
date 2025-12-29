@@ -10,7 +10,8 @@ from textual.screen import Screen
 from textual.widgets import Static, Button, Input, DataTable, ListView, ListItem, Label, Select
 from textual.binding import Binding
 
-from voidwave.tui.widgets.output import ToolOutput
+from voidwave.tui.widgets.tool_output import ToolOutput
+from voidwave.tui.helpers.preflight_runner import PreflightRunner
 
 
 class TrafficScreen(Screen):
@@ -85,6 +86,7 @@ class TrafficScreen(Screen):
         super().__init__()
         self.capture_process: asyncio.subprocess.Process | None = None
         self.capture_file: str = ""
+        self._preflight: PreflightRunner | None = None
 
     def compose(self) -> ComposeResult:
         """Compose the traffic screen layout."""
@@ -115,6 +117,7 @@ class TrafficScreen(Screen):
 
     def on_mount(self) -> None:
         """Initialize the packets table."""
+        self._preflight = PreflightRunner(self.app)
         table = self.query_one("#packets-table", DataTable)
         table.add_columns("Time", "Source", "Dest", "Protocol", "Info")
 
@@ -160,10 +163,23 @@ class TrafficScreen(Screen):
         table = self.query_one("#packets-table", DataTable)
         table.add_row(time, src, dst, proto, info[:50])
 
+    async def _run_tool(self, tool: str, need_root: bool = True) -> bool:
+        """Run preflight checks for a tool."""
+        if not self._preflight:
+            return False
+        if need_root and not await self._preflight.ensure_root():
+            return False
+        ctx = await self._preflight.prepare_tool(tool)
+        if not ctx.ready:
+            self._write_output(ctx.error or f"{tool} not available", "error")
+            return False
+        if ctx.used_fallback and ctx.fallback_tool:
+            self._write_output(f"Using {ctx.fallback_tool} instead of {tool}", "warning")
+        return True
+
     async def action_tcpdump_capture(self) -> None:
         """Start tcpdump capture."""
-        if not shutil.which("tcpdump"):
-            self.notify("tcpdump not installed", severity="error")
+        if not await self._run_tool("tcpdump"):
             return
 
         interface = self._get_interface()
@@ -191,8 +207,7 @@ class TrafficScreen(Screen):
 
     async def action_tshark_capture(self) -> None:
         """Start tshark capture."""
-        if not shutil.which("tshark"):
-            self.notify("tshark not installed", severity="error")
+        if not await self._run_tool("tshark"):
             return
 
         interface = self._get_interface()
@@ -259,8 +274,7 @@ class TrafficScreen(Screen):
 
     async def action_wireshark(self) -> None:
         """Open Wireshark."""
-        if not shutil.which("wireshark"):
-            self.notify("wireshark not installed", severity="error")
+        if not await self._run_tool("wireshark", need_root=False):
             return
 
         interface = self._get_interface()
@@ -274,8 +288,7 @@ class TrafficScreen(Screen):
 
     async def action_arp_spoof(self) -> None:
         """Start ARP spoofing (requires target configuration)."""
-        if not shutil.which("arpspoof"):
-            self.notify("arpspoof not installed (dsniff package)", severity="error")
+        if not await self._run_tool("arpspoof"):
             return
 
         self._write_output("ARP spoofing requires target and gateway configuration", "warning")
@@ -283,8 +296,7 @@ class TrafficScreen(Screen):
 
     async def action_dns_spoof(self) -> None:
         """Start DNS spoofing."""
-        if not shutil.which("dnsspoof"):
-            self.notify("dnsspoof not installed (dsniff package)", severity="error")
+        if not await self._run_tool("dnsspoof"):
             return
 
         self._write_output("DNS spoofing requires hosts file configuration", "warning")
@@ -292,8 +304,7 @@ class TrafficScreen(Screen):
 
     async def action_http_sniff(self) -> None:
         """Sniff HTTP traffic."""
-        if not shutil.which("tcpdump"):
-            self.notify("tcpdump not installed", severity="error")
+        if not await self._run_tool("tcpdump"):
             return
 
         interface = self._get_interface()
@@ -326,8 +337,7 @@ class TrafficScreen(Screen):
 
     async def action_dns_sniff(self) -> None:
         """Sniff DNS queries."""
-        if not shutil.which("tcpdump"):
-            self.notify("tcpdump not installed", severity="error")
+        if not await self._run_tool("tcpdump"):
             return
 
         interface = self._get_interface()
@@ -368,12 +378,10 @@ class TrafficScreen(Screen):
 
     async def action_creds_sniff(self) -> None:
         """Sniff for credentials."""
-        self._write_output("Sniffing for credentials (FTP, HTTP, SMTP)...", "warning")
-
-        if not shutil.which("tcpdump"):
-            self.notify("tcpdump not installed", severity="error")
+        if not await self._run_tool("tcpdump"):
             return
 
+        self._write_output("Sniffing for credentials (FTP, HTTP, SMTP)...", "warning")
         interface = self._get_interface()
 
         # Capture on common credential ports
@@ -412,8 +420,7 @@ class TrafficScreen(Screen):
             self.notify("No capture file available", severity="error")
             return
 
-        if not shutil.which("tshark"):
-            self.notify("tshark not installed", severity="error")
+        if not await self._run_tool("tshark", need_root=False):
             return
 
         self._write_output(f"Analyzing {self.capture_file}...")

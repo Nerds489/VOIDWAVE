@@ -455,10 +455,10 @@ class AirodumpTool(BaseToolWrapper):
 
         # Emit events for discovered items
         for network in result.data.get("networks", []):
-            await event_bus.emit(Events.NETWORK_FOUND, network)
+            event_bus.emit(Events.NETWORK_FOUND, network)
 
         for client in result.data.get("clients", []):
-            await event_bus.emit(Events.CLIENT_FOUND, {
+            event_bus.emit(Events.CLIENT_FOUND, {
                 "client": client,
                 "bssid": bssid,
             })

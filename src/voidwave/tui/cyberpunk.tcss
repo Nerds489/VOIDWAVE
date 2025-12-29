@@ -457,7 +457,7 @@ ModalScreen {
 .finding-info {
     background: $surface;
     color: $text-muted;
-    border-left: tall $text-muted;
+    border-left: solid $border-dim;
     padding-left: 1;
 }
 
@@ -527,14 +527,14 @@ Tooltip {
 }
 
 /* ============================================
-   SCROLLBARS
+   SCROLLBARS (Textual uses ScrollBar widget styling)
    ============================================ */
 
-*::-webkit-scrollbar {
+ScrollBar {
     background: $surface;
 }
 
-*::-webkit-scrollbar-thumb {
+ScrollBar > .scroll--bar {
     background: $primary;
 }
 

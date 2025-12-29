@@ -313,7 +313,7 @@ class TcpdumpTool(BaseToolWrapper):
         result = await self.execute(interface, options)
 
         # Emit event
-        await event_bus.emit(Events.CAPTURE_SAVED, {
+        event_bus.emit(Events.CAPTURE_SAVED, {
             "file": output_file,
             "interface": interface,
             "packet_count": result.data.get("packet_count", 0),

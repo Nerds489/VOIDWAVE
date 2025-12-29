@@ -265,13 +265,13 @@ class MasscanTool(BaseToolWrapper):
 
         # Emit events for discovered hosts and ports
         for host in result.data.get("hosts", []):
-            await event_bus.emit(Events.HOST_DISCOVERED, {
+            event_bus.emit(Events.HOST_DISCOVERED, {
                 "ip": host["ip"],
                 "source": "masscan",
             })
 
             for port in host.get("ports", []):
-                await event_bus.emit(Events.SERVICE_DISCOVERED, {
+                event_bus.emit(Events.SERVICE_DISCOVERED, {
                     "host": host["ip"],
                     "port": port["port"],
                     "protocol": port["protocol"],

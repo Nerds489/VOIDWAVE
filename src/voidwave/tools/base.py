@@ -85,7 +85,7 @@ class BaseToolWrapper(ToolPlugin):
         )
 
         # Emit start event
-        await event_bus.emit(
+        event_bus.emit(
             Events.TOOL_STARTED,
             {
                 "tool": self.TOOL_BINARY,
@@ -104,7 +104,7 @@ class BaseToolWrapper(ToolPlugin):
             parsed = self.parse_output(output)
 
             # Emit completion event
-            await event_bus.emit(
+            event_bus.emit(
                 Events.TOOL_COMPLETED,
                 {
                     "tool": self.TOOL_BINARY,
@@ -155,7 +155,7 @@ class BaseToolWrapper(ToolPlugin):
                 output_lines.append(line)
 
                 # Emit output event for TUI
-                await event_bus.emit(
+                event_bus.emit(
                     Events.TOOL_OUTPUT,
                     {
                         "tool": self.TOOL_BINARY,

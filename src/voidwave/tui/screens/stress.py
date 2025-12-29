@@ -8,7 +8,8 @@ from textual.screen import Screen
 from textual.widgets import Static, Button, Input, DataTable, ListView, ListItem, Label, Select
 from textual.binding import Binding
 
-from voidwave.tui.widgets.output import ToolOutput
+from voidwave.tui.widgets.tool_output import ToolOutput
+from voidwave.tui.helpers.preflight_runner import PreflightRunner
 
 
 class StressScreen(Screen):
@@ -88,6 +89,7 @@ class StressScreen(Screen):
     def __init__(self) -> None:
         super().__init__()
         self.stress_process: asyncio.subprocess.Process | None = None
+        self._preflight: PreflightRunner | None = None
 
     def compose(self) -> ComposeResult:
         """Compose the stress screen layout."""
@@ -118,6 +120,7 @@ class StressScreen(Screen):
 
     def on_mount(self) -> None:
         """Initialize the stats table."""
+        self._preflight = PreflightRunner(self.app)
         table = self.query_one("#stats-table", DataTable)
         table.add_columns("Metric", "Value", "Status")
 
@@ -171,6 +174,23 @@ class StressScreen(Screen):
         table = self.query_one("#stats-table", DataTable)
         table.add_row(metric, value, status)
 
+    async def _run_tool(self, tool: str, need_root: bool = True) -> str | None:
+        """Run preflight checks for a tool and return target."""
+        if not self._preflight:
+            return None
+        if need_root and not await self._preflight.ensure_root():
+            return None
+        ctx = await self._preflight.prepare_tool(tool)
+        if not ctx.ready:
+            self._write_output(ctx.error or f"{tool} not available", "error")
+            return None
+        if ctx.used_fallback and ctx.fallback_tool:
+            self._write_output(f"Using {ctx.fallback_tool} instead of {tool}", "warning")
+        target = self._get_target()
+        if not target:
+            target = await self._preflight.ensure_target("ip")
+        return target
+
     async def action_stop_test(self) -> None:
         """Stop any running stress test."""
         if self.stress_process:
@@ -183,13 +203,12 @@ class StressScreen(Screen):
 
     async def action_http_flood(self) -> None:
         """HTTP flood test using curl or hping3."""
-        target = self._get_target()
+        target = await self._run_tool("hping3")
+        if not target:
+            return
+
         port = self._get_port()
         duration = self._get_duration()
-
-        if not target:
-            self.notify("Enter a target", severity="error")
-            return
 
         self._write_output(f"Starting HTTP flood to {target}:{port} for {duration}s...", "warning")
         self._write_output("AUTHORIZED TESTING ONLY!", "error")
@@ -224,17 +243,12 @@ class StressScreen(Screen):
 
     async def action_syn_flood(self) -> None:
         """SYN flood test using hping3."""
-        target = self._get_target()
+        target = await self._run_tool("hping3")
+        if not target:
+            return
+
         port = self._get_port()
         duration = self._get_duration()
-
-        if not target:
-            self.notify("Enter a target", severity="error")
-            return
-
-        if not shutil.which("hping3"):
-            self.notify("hping3 not installed", severity="error")
-            return
 
         self._write_output(f"Starting SYN flood to {target}:{port}...", "warning")
         self._write_output("AUTHORIZED TESTING ONLY - Root required!", "error")
@@ -251,17 +265,12 @@ class StressScreen(Screen):
 
     async def action_udp_flood(self) -> None:
         """UDP flood test using hping3."""
-        target = self._get_target()
+        target = await self._run_tool("hping3")
+        if not target:
+            return
+
         port = self._get_port()
         duration = self._get_duration()
-
-        if not target:
-            self.notify("Enter a target", severity="error")
-            return
-
-        if not shutil.which("hping3"):
-            self.notify("hping3 not installed", severity="error")
-            return
 
         self._write_output(f"Starting UDP flood to {target}:{port}...", "warning")
 
@@ -277,12 +286,11 @@ class StressScreen(Screen):
 
     async def action_icmp_flood(self) -> None:
         """ICMP flood test using hping3 or ping."""
-        target = self._get_target()
-        duration = self._get_duration()
-
+        target = await self._run_tool("hping3")
         if not target:
-            self.notify("Enter a target", severity="error")
             return
+
+        duration = self._get_duration()
 
         self._write_output(f"Starting ICMP flood to {target}...", "warning")
 
@@ -309,11 +317,13 @@ class StressScreen(Screen):
     async def action_slowloris(self) -> None:
         """Slowloris attack simulation."""
         target = self._get_target()
-        port = self._get_port()
-
         if not target:
-            self.notify("Enter a target", severity="error")
-            return
+            if self._preflight:
+                target = await self._preflight.ensure_target("ip")
+            if not target:
+                return
+
+        port = self._get_port()
 
         self._write_output(f"Slowloris requires dedicated tool...", "warning")
         self._write_output("Install: pip install slowloris", "info")
@@ -329,16 +339,11 @@ class StressScreen(Screen):
 
     async def action_bandwidth_test(self) -> None:
         """Bandwidth test using iperf3."""
-        target = self._get_target()
-        duration = self._get_duration()
-
+        target = await self._run_tool("iperf3", need_root=False)
         if not target:
-            self.notify("Enter iperf3 server address", severity="error")
             return
 
-        if not shutil.which("iperf3"):
-            self.notify("iperf3 not installed", severity="error")
-            return
+        duration = self._get_duration()
 
         self._write_output(f"Testing bandwidth to {target}...")
 
@@ -359,12 +364,11 @@ class StressScreen(Screen):
 
     async def action_latency_test(self) -> None:
         """Latency test using ping."""
-        target = self._get_target()
-        count = min(self._get_duration(), 20)  # Max 20 pings
-
+        target = await self._run_tool("ping", need_root=False)
         if not target:
-            self.notify("Enter a target", severity="error")
             return
+
+        count = min(self._get_duration(), 20)  # Max 20 pings
 
         self._write_output(f"Testing latency to {target}...")
 
@@ -388,11 +392,13 @@ class StressScreen(Screen):
     async def action_connection_test(self) -> None:
         """Test maximum connections."""
         target = self._get_target()
-        port = self._get_port()
-
         if not target:
-            self.notify("Enter a target", severity="error")
-            return
+            if self._preflight:
+                target = await self._preflight.ensure_target("ip")
+            if not target:
+                return
+
+        port = self._get_port()
 
         self._write_output(f"Testing connections to {target}:{port}...")
 

@@ -258,7 +258,7 @@ class ReaverTool(BaseToolWrapper):
 
         # Emit event if PIN found
         if result.data.get("pin"):
-            await event_bus.emit(Events.WPS_PIN_FOUND, {
+            event_bus.emit(Events.WPS_PIN_FOUND, {
                 "bssid": bssid,
                 "pin": result.data["pin"],
                 "psk": result.data.get("psk"),
@@ -266,7 +266,7 @@ class ReaverTool(BaseToolWrapper):
 
         # Emit event if PSK found
         if result.data.get("psk"):
-            await event_bus.emit(Events.CREDENTIAL_CRACKED, {
+            event_bus.emit(Events.CREDENTIAL_CRACKED, {
                 "type": "wps",
                 "bssid": bssid,
                 "password": result.data["psk"],

@@ -282,7 +282,7 @@ class HydraTool(BaseToolWrapper):
 
         # Emit events for found credentials
         for cred in result.data.get("credentials", []):
-            await event_bus.emit(Events.CREDENTIAL_CRACKED, {
+            event_bus.emit(Events.CREDENTIAL_CRACKED, {
                 "service": "ssh",
                 "host": target,
                 "username": cred["username"],

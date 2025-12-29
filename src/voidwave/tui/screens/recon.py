@@ -8,7 +8,8 @@ from textual.screen import Screen
 from textual.widgets import Static, Button, Input, DataTable, ListView, ListItem, Label, Select
 from textual.binding import Binding
 
-from voidwave.tui.widgets.output import ToolOutput
+from voidwave.tui.widgets.tool_output import ToolOutput
+from voidwave.tui.helpers.preflight_runner import PreflightRunner
 
 
 class ReconScreen(Screen):
@@ -81,6 +82,7 @@ class ReconScreen(Screen):
     def __init__(self) -> None:
         super().__init__()
         self.current_target: str = ""
+        self._preflight: PreflightRunner | None = None
 
     def compose(self) -> ComposeResult:
         """Compose the recon screen layout."""
@@ -116,8 +118,39 @@ class ReconScreen(Screen):
 
     def on_mount(self) -> None:
         """Initialize the results table."""
+        self._preflight = PreflightRunner(self.app)
         table = self.query_one("#results-table", DataTable)
         table.add_columns("Type", "Finding", "Details")
+
+    async def _run_tool(self, tool_name: str, needs_target: bool = True) -> str | None:
+        """Prepare and validate tool, return target if ready.
+
+        Args:
+            tool_name: Name of the tool to run
+            needs_target: Whether a target URL is required
+
+        Returns:
+            Target URL if ready, None if cancelled
+        """
+        target = self._get_target() if needs_target else None
+
+        # Prepare tool with preflight
+        ctx = await self._preflight.prepare_tool(tool_name, target=target)
+
+        if not ctx.ready:
+            self.notify(ctx.error or f"Cannot run {tool_name}", severity="error")
+            return None
+
+        # If we needed a target and got one from preflight, use it
+        if needs_target and ctx.target:
+            target = ctx.target
+            self.query_one("#target-input", Input).value = target
+
+        # Notify if using fallback
+        if ctx.used_fallback:
+            self._write_output(f"Using {ctx.fallback_tool} instead of {tool_name}", "warning")
+
+        return target
 
     async def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Handle menu selection."""
@@ -164,13 +197,8 @@ class ReconScreen(Screen):
 
     async def action_nikto_scan(self) -> None:
         """Run Nikto web server scanner."""
-        target = self._get_target()
+        target = await self._run_tool("nikto")
         if not target:
-            self.notify("Enter a target URL", severity="error")
-            return
-
-        if not shutil.which("nikto"):
-            self.notify("nikto not installed", severity="error")
             return
 
         self._write_output(f"Running Nikto on {target}...")
@@ -196,13 +224,8 @@ class ReconScreen(Screen):
 
     async def action_gobuster_scan(self) -> None:
         """Run Gobuster directory brute force."""
-        target = self._get_target()
+        target = await self._run_tool("gobuster")
         if not target:
-            self.notify("Enter a target URL", severity="error")
-            return
-
-        if not shutil.which("gobuster"):
-            self.notify("gobuster not installed", severity="error")
             return
 
         wordlist = self._get_wordlist()
@@ -229,13 +252,8 @@ class ReconScreen(Screen):
 
     async def action_ffuf_scan(self) -> None:
         """Run FFUF fuzzing."""
-        target = self._get_target()
+        target = await self._run_tool("ffuf")
         if not target:
-            self.notify("Enter a target URL", severity="error")
-            return
-
-        if not shutil.which("ffuf"):
-            self.notify("ffuf not installed", severity="error")
             return
 
         # Ensure target has FUZZ keyword
@@ -261,13 +279,8 @@ class ReconScreen(Screen):
 
     async def action_dirb_scan(self) -> None:
         """Run Dirb directory scanner."""
-        target = self._get_target()
+        target = await self._run_tool("dirb")
         if not target:
-            self.notify("Enter a target URL", severity="error")
-            return
-
-        if not shutil.which("dirb"):
-            self.notify("dirb not installed", severity="error")
             return
 
         wordlist = self._get_wordlist()
@@ -289,13 +302,8 @@ class ReconScreen(Screen):
 
     async def action_nuclei_scan(self) -> None:
         """Run Nuclei vulnerability scanner."""
-        target = self._get_target()
+        target = await self._run_tool("nuclei")
         if not target:
-            self.notify("Enter a target URL", severity="error")
-            return
-
-        if not shutil.which("nuclei"):
-            self.notify("nuclei not installed", severity="error")
             return
 
         self._write_output(f"Running Nuclei on {target}...")
@@ -324,13 +332,8 @@ class ReconScreen(Screen):
 
     async def action_whatweb_scan(self) -> None:
         """Run WhatWeb fingerprinting."""
-        target = self._get_target()
+        target = await self._run_tool("whatweb")
         if not target:
-            self.notify("Enter a target URL", severity="error")
-            return
-
-        if not shutil.which("whatweb"):
-            self.notify("whatweb not installed", severity="error")
             return
 
         self._write_output(f"Running WhatWeb on {target}...")
@@ -355,13 +358,8 @@ class ReconScreen(Screen):
 
     async def action_wpscan_scan(self) -> None:
         """Run WPScan for WordPress sites."""
-        target = self._get_target()
+        target = await self._run_tool("wpscan")
         if not target:
-            self.notify("Enter a WordPress site URL", severity="error")
-            return
-
-        if not shutil.which("wpscan"):
-            self.notify("wpscan not installed", severity="error")
             return
 
         self._write_output(f"Running WPScan on {target}...")

@@ -205,7 +205,7 @@ class WashTool(BaseToolWrapper):
 
         # Emit events for found WPS networks
         for network in result.data.get("networks", []):
-            await event_bus.emit(Events.WPS_NETWORK_FOUND, {
+            event_bus.emit(Events.WPS_NETWORK_FOUND, {
                 "bssid": network["bssid"],
                 "essid": network.get("essid", ""),
                 "channel": network["channel"],

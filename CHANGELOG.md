@@ -2,6 +2,42 @@
 
 All notable changes to VOIDWAVE.
 
+## [10.1.0] - 2025-12-30
+
+### Added
+- **Universal Tool Installer** (`install-tools.sh`) - Comprehensive multi-method installer with:
+  - **9 Installation Methods**: pkg, pip, pipx, pygithub, github, go, cargo, snap, flatpak, gem, git
+  - **Smart Fallback Chain**: Automatically tries alternative methods when primary fails
+  - **Python GitHub Install**: Clones repos, creates virtualenvs, installs dependencies, generates wrapper scripts
+  - **Non-interactive Mode**: `DEBIAN_FRONTEND=noninteractive` for unattended apt installs
+  - **One-time apt update**: Optimized to run `apt-get update` only once per session
+  - **Auto-confirm flag**: `-y/--yes` option for scripted installations
+  - **Category-based installation**: Install tools by category (wireless, osint, recon, etc.)
+  - **Search functionality**: Find tools by name
+  - **100+ tool definitions** with distro-specific package mappings
+
+- **Python Tool Detection Enhancements** (`src/voidwave/detection/tools.py`):
+  - `pip_package` field for pip/pipx fallback installation
+  - `binary_names` field for alternative binary name detection
+  - Async pip/pipx fallback when system packages unavailable
+
+### Changed
+- **README.md** - Complete rewrite with:
+  - Modern badge styling (for-the-badge)
+  - Comprehensive tool installer documentation
+  - Clear installation instructions
+  - Full feature overview
+  - Updated project structure
+
+- **install.sh** - Added stress tools (hping3, iperf3) to bash installer
+
+### Fixed
+- **theHarvester installation** - Now works via pygithub method with isolated virtualenv
+- **iperf3 installation** - Added to package mappings for all distros
+- **Interactive apt dialogs** - Fixed blocking prompts with non-interactive mode
+
+---
+
 ## [10.0.0] - 2025-12-18
 
 ### Major Release: VOIDWAVE Evolution

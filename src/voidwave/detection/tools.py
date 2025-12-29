@@ -51,16 +51,6 @@ class PackageManager(str, Enum):
     UNKNOWN = "unknown"
 
 
-class InstallMethod(str, Enum):
-    """Installation method types."""
-
-    PACKAGE = "package"  # System package manager
-    PIP = "pip"  # Python pip
-    CARGO = "cargo"  # Rust cargo
-    GO = "go"  # Go install
-    MANUAL = "manual"  # Manual/URL only
-
-
 def detect_distro() -> DistroFamily:
     """Detect the Linux distribution family."""
     try:

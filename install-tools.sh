@@ -91,6 +91,8 @@ DISTRO_FAMILY=""
 PKG_MANAGER=""
 IS_ROOT=0
 HAS_SUDO=0
+APT_UPDATED=0
+AUTO_YES=0
 
 detect_system() {
     [[ $EUID -eq 0 ]] && IS_ROOT=1
@@ -425,7 +427,10 @@ install_pkg() {
 
     case "$PKG_MANAGER" in
         apt)
-            run_privileged apt-get update -qq 2>/dev/null
+            if [[ "${APT_UPDATED:-0}" == "0" ]]; then
+                run_privileged apt-get update -qq 2>/dev/null
+                APT_UPDATED=1
+            fi
             DEBIAN_FRONTEND=noninteractive run_privileged apt-get install -y "$actual_pkg" 2>/dev/null
             ;;
         dnf)
@@ -1078,7 +1083,13 @@ select_category() {
     echo "  [0] All categories"
     echo ""
 
-    read -rp "Select category [0-$((i-1))]: " choice
+    local choice
+    if [[ $AUTO_YES -eq 1 ]]; then
+        log "Auto-selecting all categories (-y flag)"
+        choice="0"
+    else
+        read -rp "Select category [0-$((i-1))]: " choice
+    fi
 
     if [[ "$choice" == "0" ]] || [[ -z "$choice" ]]; then
         install_missing

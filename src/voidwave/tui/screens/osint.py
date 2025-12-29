@@ -9,7 +9,8 @@ from textual.screen import Screen
 from textual.widgets import Static, Button, Input, DataTable, ListView, ListItem, Label
 from textual.binding import Binding
 
-from voidwave.tui.widgets.output import ToolOutput
+from voidwave.tui.widgets.tool_output import ToolOutput
+from voidwave.tui.helpers.preflight_runner import PreflightRunner
 
 
 class OsintScreen(Screen):
@@ -82,6 +83,7 @@ class OsintScreen(Screen):
     def __init__(self) -> None:
         super().__init__()
         self.current_target: str = ""
+        self._preflight: PreflightRunner | None = None
 
     def compose(self) -> ComposeResult:
         """Compose the OSINT screen layout."""
@@ -105,6 +107,7 @@ class OsintScreen(Screen):
 
     def on_mount(self) -> None:
         """Initialize the results table."""
+        self._preflight = PreflightRunner(self.app)
         table = self.query_one("#results-table", DataTable)
         table.add_columns("Type", "Data", "Source")
 
@@ -140,19 +143,29 @@ class OsintScreen(Screen):
         table = self.query_one("#results-table", DataTable)
         table.add_row(result_type, data, source)
 
-    async def action_theharvester(self) -> None:
-        """Run theHarvester for email and subdomain enumeration."""
+    async def _run_tool(self, tool: str) -> str | None:
+        """Run preflight checks for a tool and return target."""
+        if not self._preflight:
+            return None
+        ctx = await self._preflight.prepare_tool(tool)
+        if not ctx.ready:
+            self._write_output(ctx.error or f"{tool} not available", "error")
+            return None
+        if ctx.used_fallback and ctx.fallback_tool:
+            self._write_output(f"Using {ctx.fallback_tool} instead of {tool}", "warning")
         target = self._get_target()
         if not target:
-            self.notify("Enter a target domain", severity="error")
-            return
+            target = await self._preflight.ensure_target("domain")
+        return target
 
-        harvester = shutil.which("theHarvester") or shutil.which("theharvester")
-        if not harvester:
-            self.notify("theHarvester not installed", severity="error")
+    async def action_theharvester(self) -> None:
+        """Run theHarvester for email and subdomain enumeration."""
+        target = await self._run_tool("theharvester")
+        if not target:
             return
 
         self._write_output(f"Running theHarvester on {target}...")
+        harvester = shutil.which("theHarvester") or shutil.which("theharvester")
 
         proc = await asyncio.create_subprocess_exec(
             harvester, "-d", target, "-b", "all",
@@ -176,13 +189,8 @@ class OsintScreen(Screen):
 
     async def action_subfinder(self) -> None:
         """Run subfinder for subdomain enumeration."""
-        target = self._get_target()
+        target = await self._run_tool("subfinder")
         if not target:
-            self.notify("Enter a target domain", severity="error")
-            return
-
-        if not shutil.which("subfinder"):
-            self.notify("subfinder not installed", severity="error")
             return
 
         self._write_output(f"Running subfinder on {target}...")
@@ -204,13 +212,8 @@ class OsintScreen(Screen):
 
     async def action_amass(self) -> None:
         """Run amass for subdomain enumeration."""
-        target = self._get_target()
+        target = await self._run_tool("amass")
         if not target:
-            self.notify("Enter a target domain", severity="error")
-            return
-
-        if not shutil.which("amass"):
-            self.notify("amass not installed", severity="error")
             return
 
         self._write_output(f"Running amass on {target} (this may take a while)...")
@@ -232,13 +235,8 @@ class OsintScreen(Screen):
 
     async def action_whois_lookup(self) -> None:
         """Run WHOIS lookup."""
-        target = self._get_target()
+        target = await self._run_tool("whois")
         if not target:
-            self.notify("Enter a target domain or IP", severity="error")
-            return
-
-        if not shutil.which("whois"):
-            self.notify("whois not installed", severity="error")
             return
 
         self._write_output(f"Running WHOIS on {target}...")
@@ -264,14 +262,8 @@ class OsintScreen(Screen):
 
     async def action_dns_lookup(self) -> None:
         """Run DNS lookups."""
-        target = self._get_target()
+        target = await self._run_tool("dig")
         if not target:
-            self.notify("Enter a target domain", severity="error")
-            return
-
-        dig = shutil.which("dig")
-        if not dig:
-            self.notify("dig not installed", severity="error")
             return
 
         self._write_output(f"Running DNS lookups on {target}...")
@@ -298,8 +290,10 @@ class OsintScreen(Screen):
         """Search Shodan for the target."""
         target = self._get_target()
         if not target:
-            self.notify("Enter a target IP or domain", severity="error")
-            return
+            if self._preflight:
+                target = await self._preflight.ensure_target("ip")
+            if not target:
+                return
 
         api_key = os.environ.get("SHODAN_API_KEY")
         if not api_key:
@@ -309,8 +303,11 @@ class OsintScreen(Screen):
                 with open(key_path) as f:
                     api_key = f.read().strip()
 
+        if not api_key and self._preflight:
+            api_key = await self._preflight.ensure_api_key("SHODAN_API_KEY")
+
         if not api_key:
-            self.notify("Shodan API key required. Configure in Settings.", severity="error")
+            self._write_output("Shodan API key required. Configure in Settings.", "error")
             return
 
         if not shutil.which("curl"):
@@ -356,14 +353,21 @@ class OsintScreen(Screen):
         """Search Censys for the target."""
         target = self._get_target()
         if not target:
-            self.notify("Enter a target IP", severity="error")
-            return
+            if self._preflight:
+                target = await self._preflight.ensure_target("ip")
+            if not target:
+                return
 
         api_id = os.environ.get("CENSYS_API_ID")
         api_secret = os.environ.get("CENSYS_API_SECRET")
 
+        if not api_id and self._preflight:
+            api_id = await self._preflight.ensure_api_key("CENSYS_API_ID")
+        if not api_secret and self._preflight:
+            api_secret = await self._preflight.ensure_api_key("CENSYS_API_SECRET")
+
         if not api_id or not api_secret:
-            self.notify("Censys API credentials required. Configure in Settings.", severity="error")
+            self._write_output("Censys API credentials required. Configure in Settings.", "error")
             return
 
         self._write_output(f"Searching Censys for {target}...")
@@ -373,8 +377,10 @@ class OsintScreen(Screen):
         """Generate Google dorks for the target."""
         target = self._get_target()
         if not target:
-            self.notify("Enter a target domain", severity="error")
-            return
+            if self._preflight:
+                target = await self._preflight.ensure_target("domain")
+            if not target:
+                return
 
         self._write_output(f"Generating Google dorks for {target}...")
 
@@ -401,13 +407,8 @@ class OsintScreen(Screen):
 
     async def action_sherlock(self) -> None:
         """Run Sherlock for username enumeration."""
-        target = self._get_target()
+        target = await self._run_tool("sherlock")
         if not target:
-            self.notify("Enter a username to search", severity="error")
-            return
-
-        if not shutil.which("sherlock"):
-            self.notify("sherlock not installed", severity="error")
             return
 
         self._write_output(f"Running Sherlock for username: {target}...")

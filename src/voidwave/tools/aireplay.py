@@ -380,7 +380,7 @@ class AireplayTool(BaseToolWrapper):
         result = await self.execute(interface, options)
 
         # Emit event
-        await event_bus.emit(Events.DEAUTH_SENT, {
+        event_bus.emit(Events.DEAUTH_SENT, {
             "bssid": bssid,
             "client": client or "broadcast",
             "count": result.data.get("packets_sent", count),

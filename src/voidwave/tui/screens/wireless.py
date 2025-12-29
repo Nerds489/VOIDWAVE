@@ -26,6 +26,7 @@ from textual.widgets.option_list import Option
 
 from voidwave.core.logging import get_logger
 from voidwave.orchestration.events import Events
+from voidwave.tui.helpers.preflight_runner import PreflightRunner
 
 if TYPE_CHECKING:
     from textual.widgets.data_table import RowKey
@@ -302,6 +303,8 @@ class WirelessScreen(Screen):
         self._scanning = False
         self._scan_task: asyncio.Task | None = None
         self._selected_network: AccessPoint | None = None
+        self._preflight: PreflightRunner | None = None
+        self._monitor_interface: str | None = None
 
     def compose(self) -> ComposeResult:
         # Left: Menu panel
@@ -351,9 +354,19 @@ class WirelessScreen(Screen):
 
     async def on_mount(self) -> None:
         """Initialize screen."""
-        # Refresh interfaces
+        # Initialize preflight runner
+        self._preflight = PreflightRunner(self.app)
+
+        # Refresh interfaces using automation handler
         selector = self.query_one("#interface-selector", InterfaceSelector)
         await selector.refresh_interfaces()
+
+        # If no interfaces found, show helpful message
+        if not selector.interfaces:
+            self._write_output(
+                "[yellow]No wireless interfaces found.[/]\n"
+                "[dim]Connect a monitor-mode capable WiFi adapter.[/]"
+            )
 
         # Subscribe to wireless events
         self._subscribe_events()
@@ -445,51 +458,55 @@ class WirelessScreen(Screen):
 
     async def _toggle_monitor_mode(self) -> None:
         """Toggle monitor mode on selected interface."""
+        # Check root first
+        if not await self._preflight.ensure_root():
+            return
+
+        # Check for airmon-ng
+        if not await self._preflight.ensure_tool("airmon-ng"):
+            return
+
         selector = self.query_one("#interface-selector", InterfaceSelector)
         select = selector.query_one("#interface-select", Select)
 
+        # If no interface selected, use modal to pick one
         if not select.value:
-            self._write_output("[red]No interface selected[/]")
-            return
-
-        interface = str(select.value)
+            interface = await self._preflight.ensure_interface("wireless")
+            if not interface:
+                return
+        else:
+            interface = str(select.value)
 
         try:
-            import subprocess
-
             # Check if already in monitor mode
-            if interface.endswith("mon"):
+            if interface.endswith("mon") or "mon" in interface:
                 # Disable monitor mode
+                from voidwave.tui.modals.preflight_modal import ConfirmModal
+
+                confirm = await self.app.push_screen_wait(
+                    ConfirmModal(
+                        "Disable Monitor Mode",
+                        f"Disable monitor mode on {interface}?"
+                    )
+                )
+                if not confirm:
+                    return
+
                 self._write_output(f"[yellow]Disabling monitor mode on {interface}...[/]")
-                subprocess.run(
-                    ["sudo", "airmon-ng", "stop", interface],
-                    capture_output=True,
-                    timeout=30,
-                )
+
+                from voidwave.automation.handlers.monitor import AutoMonHandler
+                handler = AutoMonHandler(interface)
+                handler.monitor_interface = interface
+                await handler.disable_monitor_mode()
+
                 self._write_output(f"[green]Monitor mode disabled[/]")
+                self._monitor_interface = None
             else:
-                # Enable monitor mode
-                self._write_output(f"[yellow]Enabling monitor mode on {interface}...[/]")
-
-                # Kill interfering processes
-                subprocess.run(
-                    ["sudo", "airmon-ng", "check", "kill"],
-                    capture_output=True,
-                    timeout=10,
-                )
-
-                # Start monitor mode
-                result = subprocess.run(
-                    ["sudo", "airmon-ng", "start", interface],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-
-                if result.returncode == 0:
-                    self._write_output(f"[green]Monitor mode enabled[/]")
-                else:
-                    self._write_output(f"[red]Failed to enable monitor mode[/]")
+                # Enable monitor mode using preflight helper
+                mon_iface = await self._preflight.ensure_monitor_mode(interface)
+                if mon_iface:
+                    self._monitor_interface = mon_iface
+                    self._write_output(f"[green]Monitor mode enabled: {mon_iface}[/]")
 
             # Refresh interfaces
             await selector.refresh_interfaces()
@@ -503,18 +520,23 @@ class WirelessScreen(Screen):
             self._write_output("[yellow]Scan already running[/]")
             return
 
-        selector = self.query_one("#interface-selector", InterfaceSelector)
-        select = selector.query_one("#interface-select", Select)
-
-        if not select.value:
-            self._write_output("[red]No interface selected[/]")
+        # Check root
+        if not await self._preflight.ensure_root():
             return
 
-        interface = str(select.value)
+        # Check for airodump-ng
+        if not await self._preflight.ensure_tool("airodump-ng"):
+            return
 
-        # Check for monitor mode
-        if not interface.endswith("mon"):
-            self._write_output("[yellow]Interface should be in monitor mode for scanning[/]")
+        # Ensure we have a monitor-mode interface
+        if self._monitor_interface:
+            interface = self._monitor_interface
+        else:
+            # Try to get or enable monitor mode
+            interface = await self._preflight.ensure_monitor_mode()
+            if not interface:
+                return
+            self._monitor_interface = interface
 
         self._scanning = True
         self._write_output(f"[green]Starting scan on {interface}...[/]")
@@ -564,21 +586,39 @@ class WirelessScreen(Screen):
 
     async def _deauth_attack(self) -> None:
         """Perform deauthentication attack."""
-        selector = self.query_one("#interface-selector", InterfaceSelector)
-        select = selector.query_one("#interface-select", Select)
-
-        if not select.value:
-            self._write_output("[red]No interface selected[/]")
+        # Check root
+        if not await self._preflight.ensure_root():
             return
 
-        interface = str(select.value)
+        # Check for aireplay-ng
+        if not await self._preflight.ensure_tool("aireplay-ng"):
+            return
+
+        # Ensure monitor mode interface
+        if not self._monitor_interface:
+            interface = await self._preflight.ensure_monitor_mode()
+            if not interface:
+                return
+            self._monitor_interface = interface
+        else:
+            interface = self._monitor_interface
+
         bssid_input = self.query_one("#input-bssid", Input)
         client_input = self.query_one("#input-client", Input)
         count_input = self.query_one("#input-deauth-count", Input)
 
+        # Ensure target is selected
         if not bssid_input.value:
-            self._write_output("[red]No target BSSID selected[/]")
-            return
+            if self._selected_network:
+                bssid_input.value = self._selected_network.bssid
+            else:
+                from voidwave.tui.modals.preflight_modal import InputModal
+                bssid = await self.app.push_screen_wait(
+                    InputModal("Enter Target BSSID", "AA:BB:CC:DD:EE:FF")
+                )
+                if not bssid:
+                    return
+                bssid_input.value = bssid
 
         try:
             from voidwave.tools.aireplay import AireplayTool
@@ -608,18 +648,30 @@ class WirelessScreen(Screen):
 
     async def _capture_handshake(self) -> None:
         """Capture WPA handshake."""
-        selector = self.query_one("#interface-selector", InterfaceSelector)
-        select = selector.query_one("#interface-select", Select)
-
-        if not select.value:
-            self._write_output("[red]No interface selected[/]")
+        # Check root
+        if not await self._preflight.ensure_root():
             return
 
+        # Check tools
+        if not await self._preflight.ensure_tool("airodump-ng"):
+            return
+        if not await self._preflight.ensure_tool("aireplay-ng"):
+            return
+
+        # Ensure monitor mode interface
+        if not self._monitor_interface:
+            interface = await self._preflight.ensure_monitor_mode()
+            if not interface:
+                return
+            self._monitor_interface = interface
+        else:
+            interface = self._monitor_interface
+
+        # Ensure target is selected
         if not self._selected_network:
-            self._write_output("[red]No network selected[/]")
+            self._write_output("[yellow]No network selected - select a target from the table[/]")
             return
 
-        interface = str(select.value)
         ap = self._selected_network
 
         self._write_output(
@@ -675,31 +727,35 @@ class WirelessScreen(Screen):
 
     async def _pmkid_attack(self) -> None:
         """Perform PMKID attack using hcxdumptool."""
+        # Check root
+        if not await self._preflight.ensure_root():
+            return
+
+        # Check for hcxdumptool
+        if not await self._preflight.ensure_tool("hcxdumptool"):
+            return
+
+        # Ensure monitor mode interface
+        if not self._monitor_interface:
+            interface = await self._preflight.ensure_monitor_mode()
+            if not interface:
+                return
+            self._monitor_interface = interface
+        else:
+            interface = self._monitor_interface
+
+        # Ensure target is selected
         if not self._selected_network:
-            self._write_output("[red]No network selected[/]")
+            self._write_output("[yellow]No network selected - select a target from the table[/]")
             return
 
-        selector = self.query_one("#interface-selector", InterfaceSelector)
-        select = selector.query_one("#interface-select", Select)
-
-        if not select.value:
-            self._write_output("[red]No interface selected[/]")
-            return
-
-        interface = str(select.value)
         network = self._selected_network
 
         self._write_output(f"[cyan]Starting PMKID attack on {network.essid} ({network.bssid})...[/]")
 
         try:
-            import shutil
             import tempfile
             from pathlib import Path
-
-            # Check for hcxdumptool
-            if not shutil.which("hcxdumptool"):
-                self._write_output("[red]hcxdumptool not found. Install with: apt install hcxdumptool[/]")
-                return
 
             # Create output file
             output_dir = Path(tempfile.gettempdir()) / "voidwave"
@@ -760,18 +816,28 @@ class WirelessScreen(Screen):
 
     async def _wps_attack(self) -> None:
         """Perform WPS attack using Reaver."""
+        # Check root
+        if not await self._preflight.ensure_root():
+            return
+
+        # Check for reaver
+        if not await self._preflight.ensure_tool("reaver"):
+            return
+
+        # Ensure monitor mode interface
+        if not self._monitor_interface:
+            interface = await self._preflight.ensure_monitor_mode()
+            if not interface:
+                return
+            self._monitor_interface = interface
+        else:
+            interface = self._monitor_interface
+
+        # Ensure target is selected
         if not self._selected_network:
-            self._write_output("[red]No network selected[/]")
+            self._write_output("[yellow]No network selected - select a target from the table[/]")
             return
 
-        selector = self.query_one("#interface-selector", InterfaceSelector)
-        select = selector.query_one("#interface-select", Select)
-
-        if not select.value:
-            self._write_output("[red]No interface selected[/]")
-            return
-
-        interface = str(select.value)
         network = self._selected_network
 
         # Check WPS status

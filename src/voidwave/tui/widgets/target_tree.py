@@ -22,7 +22,7 @@ class TargetTree(Tree[TargetNode]):
     DEFAULT_CSS: ClassVar[str] = """
     TargetTree {
         height: 100%;
-        border: solid $border-dim;
+        border: solid #3a3a5e;
         background: $surface;
     }
     """

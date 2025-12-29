@@ -11,7 +11,7 @@ class StatusPanel(Static):
     DEFAULT_CSS: ClassVar[str] = """
     StatusPanel {
         height: 100%;
-        border: solid $border-dim;
+        border: solid #3a3a5e;
         background: $surface;
         padding: 1;
     }

@@ -109,7 +109,7 @@ class BaseWorkflow:
         """Initialize workflow."""
         self.context.started_at = datetime.now()
         self.context.current_phase = "initializing"
-        await event_bus.emit(
+        event_bus.emit(
             Events.TASK_STARTED,
             {
                 "task_id": id(self),
@@ -122,7 +122,7 @@ class BaseWorkflow:
         """Workflow completed."""
         self.context.ended_at = datetime.now()
         self.context.current_phase = "completed"
-        await event_bus.emit(
+        event_bus.emit(
             Events.TASK_COMPLETED,
             {
                 "task_id": id(self),

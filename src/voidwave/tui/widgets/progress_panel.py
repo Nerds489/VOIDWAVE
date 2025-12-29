@@ -24,7 +24,7 @@ class ProgressPanel(Static):
     ProgressPanel {
         height: auto;
         min-height: 5;
-        border: solid $border-dim;
+        border: solid #3a3a5e;
         background: $surface;
         padding: 1;
     }

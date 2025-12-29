@@ -57,21 +57,35 @@ class VoidwaveEventBus(AsyncIOEventEmitter):
         self._event_history: list[tuple[str, dict]] = []
         self._max_history = 1000
 
-    async def emit(self, event: Events | str, data: dict[str, Any] | None = None) -> None:
-        """Emit an event."""
+    def emit(self, event: Events | str, *args: Any, **kwargs: Any) -> None:
+        """Emit an event (sync wrapper for pyee compatibility)."""
         event_name = event.value if isinstance(event, Events) else event
-        data = data or {}
 
-        # Log event
-        logger.debug(f"Event: {event_name} - {data}")
+        # Handle pyee internal events (new_listener, etc.) which pass multiple args
+        if args and not isinstance(args[0], dict):
+            super().emit(event_name, *args, **kwargs)
+            return
 
-        # Store in history
-        self._event_history.append((event_name, data))
-        if len(self._event_history) > self._max_history:
-            self._event_history.pop(0)
+        # Handle our typed events with data dict
+        data = args[0] if args else kwargs.get("data", {})
+        if data is None:
+            data = {}
+
+        # Log event (skip internal pyee events)
+        if not event_name.startswith("new_"):
+            logger.debug(f"Event: {event_name} - {data}")
+
+            # Store in history
+            self._event_history.append((event_name, data))
+            if len(self._event_history) > self._max_history:
+                self._event_history.pop(0)
 
         # Emit to listeners
         super().emit(event_name, data)
+
+    async def emit_async(self, event: Events | str, data: dict[str, Any] | None = None) -> None:
+        """Emit an event asynchronously."""
+        self.emit(event, data or {})
 
     def on(self, event: Events | str, handler: EventHandler) -> None:
         """Register an event handler."""

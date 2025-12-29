@@ -12,8 +12,8 @@ class ToolOutput(RichLog):
     DEFAULT_CSS: ClassVar[str] = """
     ToolOutput {
         height: 100%;
-        border: solid $border-dim;
-        background: $background;
+        border: solid #3a3a5e;
+        background: #1a1a2e;
     }
     """
 

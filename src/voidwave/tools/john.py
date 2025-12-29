@@ -270,7 +270,7 @@ class JohnTool(BaseToolWrapper):
 
         # Emit events for cracked passwords
         for crack in result.data.get("cracked", []):
-            await event_bus.emit(Events.CREDENTIAL_CRACKED, {
+            event_bus.emit(Events.CREDENTIAL_CRACKED, {
                 "hash": crack.get("hash_or_user", ""),
                 "password": crack.get("password", ""),
             })

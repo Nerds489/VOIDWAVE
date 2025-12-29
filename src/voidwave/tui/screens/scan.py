@@ -26,6 +26,7 @@ from textual.widgets.option_list import Option
 from voidwave.config.settings import get_settings
 from voidwave.core.logging import get_logger
 from voidwave.orchestration.events import Events
+from voidwave.tui.helpers.preflight_runner import PreflightRunner
 
 if TYPE_CHECKING:
     pass
@@ -132,6 +133,7 @@ class ScanScreen(Screen):
         self._scan_task: asyncio.Task | None = None
         self._hosts: dict[str, HostResult] = {}
         self._selected_host: HostResult | None = None
+        self._preflight: PreflightRunner | None = None
 
     def compose(self) -> ComposeResult:
         settings = get_settings()
@@ -213,6 +215,7 @@ class ScanScreen(Screen):
 
     async def on_mount(self) -> None:
         """Initialize screen."""
+        self._preflight = PreflightRunner(self.app)
         self._setup_tables()
         self._subscribe_events()
 
@@ -380,22 +383,50 @@ class ScanScreen(Screen):
             self._write_output("[yellow]Scan already running[/]")
             return
 
+        # Get target from input or prompt
         target = self.query_one("#input-target", Input).value.strip()
-        if not target:
-            self._write_output("[red]Please enter a target[/]")
+
+        # Prepare nmap tool - this handles all requirements
+        ctx = await self._preflight.prepare_tool("nmap", target=target if target else None)
+
+        if not ctx.ready:
+            self._write_output(f"[red]{ctx.error}[/]")
             return
+
+        # Update target if it was prompted
+        if ctx.target and not target:
+            self.query_one("#input-target", Input).value = ctx.target
+
+        target = ctx.target or target
+
+        # If using a fallback tool, notify
+        if ctx.used_fallback:
+            self._write_output(f"[yellow]Using {ctx.fallback_tool} instead of nmap[/]")
 
         self._scanning = True
         self._write_output(f"[green]Starting scan of {target}...[/]")
 
-        self._scan_task = asyncio.create_task(self._run_scan(target))
+        self._scan_task = asyncio.create_task(self._run_scan(target, ctx.tool))
 
-    async def _run_scan(self, target: str) -> None:
+    async def _run_scan(self, target: str, tool_name: str = "nmap") -> None:
         """Run the network scan."""
         try:
-            from voidwave.tools.nmap import NmapTool
+            # Use appropriate tool based on what's available
+            if tool_name == "nmap":
+                from voidwave.tools.nmap import NmapTool
+                tool = NmapTool()
+            elif tool_name == "rustscan":
+                # Rustscan uses nmap for service detection, so we can use NmapTool
+                from voidwave.tools.nmap import NmapTool
+                tool = NmapTool()
+                tool.binary = "rustscan"  # Override binary
+            elif tool_name == "masscan":
+                from voidwave.tools.masscan import MasscanTool
+                tool = MasscanTool()
+            else:
+                from voidwave.tools.nmap import NmapTool
+                tool = NmapTool()
 
-            tool = NmapTool()
             await tool.initialize()
 
             # Build options from UI

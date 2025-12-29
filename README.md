@@ -47,14 +47,18 @@
 # Clone and install
 git clone https://github.com/Nerds489/VOIDWAVE.git
 cd VOIDWAVE
-pip install -e .
+./install.sh           # Recommended: installs via pipx
+# OR: pip install -e . # Alternative: editable install
 
-# Launch TUI
+# Launch TUI (from any directory)
 voidwave
 
-# Or run with sudo for full functionality
-sudo voidwave
+# Run with sudo for full functionality
+sudo $(which voidwave)  # Ensures the Python TUI is used, not bash wrapper
 ```
+
+> **Note**: When in the VOIDWAVE directory, `sudo voidwave` runs the legacy bash version.
+> Use `sudo $(which voidwave)` or `cd ~ && sudo voidwave` to ensure the Python TUI runs.
 
 ---
 

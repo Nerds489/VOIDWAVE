@@ -51,6 +51,16 @@ class PackageManager(str, Enum):
     UNKNOWN = "unknown"
 
 
+class InstallMethod(str, Enum):
+    """Installation method types."""
+
+    PACKAGE = "package"  # System package manager
+    PIP = "pip"  # Python pip
+    CARGO = "cargo"  # Rust cargo
+    GO = "go"  # Go install
+    MANUAL = "manual"  # Manual/URL only
+
+
 def detect_distro() -> DistroFamily:
     """Detect the Linux distribution family."""
     try:
@@ -111,6 +121,8 @@ class ToolDefinition:
     packages: dict[str, str] = field(default_factory=dict)
     requires_root: bool = False
     url: str = ""
+    pip_package: str = ""  # pip install name (e.g., "theHarvester")
+    binary_names: list[str] = field(default_factory=list)  # Alternative binary names to check
 
 
 @dataclass
@@ -133,9 +145,19 @@ class ToolInfo:
         category: ToolCategory | None = None,
         description: str = "",
         requires_root: bool = False,
+        binary_names: list[str] | None = None,
     ) -> Self:
         """Detect tool availability and version."""
-        path = shutil.which(name)
+        # Check primary name first, then alternatives
+        names_to_check = [name]
+        if binary_names:
+            names_to_check.extend(n for n in binary_names if n != name)
+
+        path = None
+        for check_name in names_to_check:
+            path = shutil.which(check_name)
+            if path:
+                break
 
         if path is None:
             return cls(
@@ -440,6 +462,8 @@ class ToolRegistry:
             category=ToolCategory.OSINT,
             description="Email and subdomain harvester",
             packages={"debian": "theharvester", "arch": "theharvester"},
+            pip_package="theHarvester",
+            binary_names=["theHarvester", "theharvester", "theHarvester.py"],
         ),
         "whois": ToolDefinition(
             name="whois",
@@ -488,6 +512,7 @@ class ToolRegistry:
             category=ToolCategory.OSINT,
             description="Shodan CLI",
             packages={"debian": "shodan"},
+            pip_package="shodan",
         ),
         "recon-ng": ToolDefinition(
             name="recon-ng",
@@ -862,6 +887,7 @@ class ToolRegistry:
                     category=defn.category,
                     description=defn.description,
                     requires_root=defn.requires_root,
+                    binary_names=defn.binary_names if defn.binary_names else None,
                 )
             else:
                 self._cache[name] = ToolInfo.detect(name)
@@ -1044,7 +1070,7 @@ class ToolRegistry:
         tool_name: str,
         callback: callable | None = None,
     ) -> tuple[bool, str]:
-        """Install a tool using the system package manager.
+        """Install a tool using the system package manager or pip.
 
         Args:
             tool_name: Name of the tool to install
@@ -1053,15 +1079,56 @@ class ToolRegistry:
         Returns:
             Tuple of (success, message)
         """
+        defn = self.TOOL_DEFINITIONS.get(tool_name)
+
+        # Try package manager first
         cmd = self.get_install_command(tool_name)
-        if not cmd:
-            defn = self.TOOL_DEFINITIONS.get(tool_name)
-            if defn and defn.url:
-                return False, f"Manual install required: {defn.url}"
-            return False, f"No package available for {tool_name} on {self.distro.value}"
+        if cmd:
+            logger.info(f"Installing {tool_name} via package manager: {' '.join(cmd)}")
+            success, msg = await self._run_install_cmd(cmd, tool_name, callback)
+            if success:
+                return success, msg
+            # Package manager failed, try pip fallback if available
+            logger.warning(f"Package manager install failed for {tool_name}, trying pip...")
 
-        logger.info(f"Installing {tool_name}: {' '.join(cmd)}")
+        # Try pip installation if pip_package is defined
+        if defn and defn.pip_package:
+            pip_cmd = await self._get_pip_install_command(defn.pip_package)
+            if pip_cmd:
+                logger.info(f"Installing {tool_name} via pip: {' '.join(pip_cmd)}")
+                success, msg = await self._run_install_cmd(pip_cmd, tool_name, callback)
+                if success:
+                    return success, msg
 
+        # No install method available
+        if defn and defn.url:
+            return False, f"Manual install required: {defn.url}"
+        return False, f"No package available for {tool_name} on {self.distro.value}"
+
+    async def _get_pip_install_command(self, package: str) -> list[str] | None:
+        """Get pip/pipx install command for a package.
+
+        Prefers pipx for CLI tools (isolated environments), falls back to pip.
+        """
+        # Prefer pipx for CLI tools
+        pipx_cmd = shutil.which("pipx")
+        if pipx_cmd:
+            return [pipx_cmd, "install", package]
+
+        # Fall back to pip
+        pip_cmd = shutil.which("pip3") or shutil.which("pip")
+        if pip_cmd:
+            return [pip_cmd, "install", "--user", package]
+
+        return None
+
+    async def _run_install_cmd(
+        self,
+        cmd: list[str],
+        tool_name: str,
+        callback: callable | None = None,
+    ) -> tuple[bool, str]:
+        """Run an install command and verify success."""
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,

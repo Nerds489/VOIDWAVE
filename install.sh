@@ -351,11 +351,13 @@ get_pkg_name() {
                 wireshark) echo "wireshark" ;;
                 tcpdump) echo "tcpdump" ;;
                 hping3) echo "hping3" ;;
+                iperf3) echo "iperf3" ;;
                 netcat) echo "netcat-openbsd" ;;
                 gobuster) echo "gobuster" ;;
                 ffuf) echo "ffuf" ;;
                 nuclei) echo "" ;; # Not in repos
                 subfinder) echo "" ;; # Not in repos
+                theharvester) echo "" ;; # Use pip: pip3 install theHarvester
                 *) echo "$tool" ;;
             esac ;;
         redhat)
@@ -369,6 +371,7 @@ get_pkg_name() {
                 wireshark) echo "wireshark-cli" ;;
                 tcpdump) echo "tcpdump" ;;
                 hping3) echo "hping3" ;;
+                iperf3) echo "iperf3" ;;
                 netcat) echo "nc" ;;
                 *) echo "$tool" ;;
             esac ;;
@@ -384,11 +387,13 @@ get_pkg_name() {
                 sqlmap) echo "sqlmap" ;;
                 wireshark) echo "wireshark-cli" ;;
                 tcpdump) echo "tcpdump" ;;
-                hping3) echo "hping3" ;;
+                hping3) echo "hping" ;;
+                iperf3) echo "iperf3" ;;
                 netcat) echo "gnu-netcat" ;;
                 gobuster) echo "gobuster" ;;
                 nuclei) echo "nuclei" ;;
                 subfinder) echo "subfinder" ;;
+                theharvester) echo "theharvester" ;;
                 *) echo "$tool" ;;
             esac ;;
         *)
@@ -444,6 +449,12 @@ RECON_TOOLS=(
     nuclei
 )
 
+# Stress testing tools
+STRESS_TOOLS=(
+    hping3
+    iperf3
+)
+
 install_security_tools() {
     header "Installing Security Tools"
     echo ""
@@ -465,7 +476,8 @@ install_security_tools() {
 
     # Combine all tools
     local -a ALL_TOOLS=("${CORE_TOOLS[@]}" "${NETWORK_TOOLS[@]}" "${WIRELESS_TOOLS[@]}"
-                        "${CRACKING_TOOLS[@]}" "${WEB_TOOLS[@]}" "${RECON_TOOLS[@]}")
+                        "${CRACKING_TOOLS[@]}" "${WEB_TOOLS[@]}" "${RECON_TOOLS[@]}"
+                        "${STRESS_TOOLS[@]}")
 
     for tool in "${ALL_TOOLS[@]}"; do
         # Skip if already installed

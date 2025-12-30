@@ -41,6 +41,16 @@ class Events(str, Enum):
     SESSION_UPDATED = "session.updated"
     SESSION_ENDED = "session.ended"
 
+    # Chain execution
+    CHAIN_STARTED = "chain.started"
+    CHAIN_STEP_STARTED = "chain.step.started"
+    CHAIN_STEP_COMPLETED = "chain.step.completed"
+    CHAIN_STEP_FAILED = "chain.step.failed"
+    CHAIN_STEP_SKIPPED = "chain.step.skipped"
+    CHAIN_COMPLETED = "chain.completed"
+    CHAIN_FAILED = "chain.failed"
+    CHAIN_CANCELLED = "chain.cancelled"
+
     # UI
     STATUS_UPDATE = "ui.status"
     NOTIFICATION = "ui.notification"

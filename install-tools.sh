@@ -998,10 +998,10 @@ list_tools() {
             current_category="$category"
         fi
 
-        ((total++))
+        ((++total))
 
         if has_cmd "$binary_name"; then
-            ((installed++))
+            ((++installed))
             if [[ "$filter" != "missing" ]]; then
                 local path version
                 path=$(command -v "$binary_name")
@@ -1010,7 +1010,7 @@ list_tools() {
                 [[ -n "$version" ]] && echo -e "    ${DIM}${version}${RESET}"
             fi
         else
-            ((missing++))
+            ((++missing))
             if [[ "$filter" != "installed" ]]; then
                 echo -e "  ${RED}✗${RESET} ${tool}"
             fi
@@ -1046,14 +1046,14 @@ install_missing() {
         binary_name=$(echo "$tool_def" | cut -d'|' -f2)
 
         if has_cmd "$binary_name"; then
-            ((skipped++))
+            ((++skipped))
             continue
         fi
 
         if install_tool "$tool"; then
-            ((installed++))
+            ((++installed))
         else
-            ((failed++))
+            ((++failed))
         fi
     done
 
@@ -1284,7 +1284,7 @@ main() {
                         status="${RED}✗${RESET}"
                     fi
                     echo "  $status $tool ($category)"
-                    ((found++))
+                    ((++found))
                 fi
             done
             if [[ $found -eq 0 ]]; then

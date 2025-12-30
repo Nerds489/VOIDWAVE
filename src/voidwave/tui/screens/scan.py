@@ -512,13 +512,13 @@ class ScanScreen(Screen):
             extra.extend(custom.split())
             options["extra_args"] = extra
 
-        # Options
+        # Options - use keys that NmapTool expects
         if self.query_one("#check-version", Checkbox).value:
-            options["service_version"] = True
+            options["service_detection"] = True
         if self.query_one("#check-os", Checkbox).value:
             options["os_detection"] = True
         if self.query_one("#check-scripts", Checkbox).value:
-            options["script_scan"] = True
+            options["scripts"] = ["default"]  # NmapTool expects list of script names
         if self.query_one("#check-skip-discovery", Checkbox).value:
             options["skip_discovery"] = True
 

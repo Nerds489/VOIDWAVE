@@ -10,6 +10,7 @@ from voidwave.core.logging import get_logger
 from voidwave.orchestration.events import event_bus
 from voidwave.orchestration.control import ExecutionController
 from voidwave.tui.integration import TUIEventBridge
+from voidwave.sessions import get_session_manager, Session, SessionManager
 
 if TYPE_CHECKING:
     from voidwave.orchestration.events import VoidwaveEventBus
@@ -51,6 +52,14 @@ class VoidwaveApp(App):
         self.execution_controller = ExecutionController(self.event_bus)
         self._event_bridge: TUIEventBridge | None = None
 
+        # Session management
+        self.session_manager: SessionManager = get_session_manager()
+
+    @property
+    def current_session(self) -> Session | None:
+        """Get the current active session."""
+        return self.session_manager.current
+
     def compose(self) -> ComposeResult:
         """Compose the application layout."""
         yield Header()
@@ -62,6 +71,14 @@ class VoidwaveApp(App):
     async def on_mount(self) -> None:
         """Handle application mount."""
         logger.info("VOIDWAVE TUI started")
+
+        # Initialize database
+        try:
+            from voidwave.db.engine import get_db
+            await get_db()
+            logger.info("Database initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize database: {e}")
 
         # Connect event bridge to wire events to widgets
         self._event_bridge = TUIEventBridge(self, self.event_bus)
@@ -90,6 +107,14 @@ class VoidwaveApp(App):
 
     async def on_unmount(self) -> None:
         """Handle application unmount."""
+        # Pause current session if active
+        if self.current_session:
+            try:
+                await self.session_manager.pause(self.current_session.id)
+                logger.info(f"Session paused: {self.current_session.name}")
+            except Exception as e:
+                logger.warning(f"Failed to pause session: {e}")
+
         # Disconnect event bridge
         if self._event_bridge:
             self._event_bridge.disconnect()
@@ -97,6 +122,15 @@ class VoidwaveApp(App):
 
         # Stop any running tools
         await self.execution_controller.stop_all(timeout=3.0)
+
+        # Close database connection
+        try:
+            from voidwave.db.engine import _db_engine
+            if _db_engine:
+                await _db_engine.close()
+        except Exception as e:
+            logger.warning(f"Failed to close database: {e}")
+
         logger.info("VOIDWAVE TUI shutdown complete")
 
     # Action handlers

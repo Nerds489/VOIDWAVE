@@ -515,10 +515,10 @@ class CredentialsScreen(Screen):
         if mask:
             options["mask"] = mask
 
-        # Rules
+        # Rules - HashcatTool expects a list
         rules = self.query_one("#input-rules", Input).value.strip()
         if rules:
-            options["rules_file"] = rules
+            options["rules"] = [rules]
 
         # Workload
         workload = self.query_one("#select-workload", Select).value

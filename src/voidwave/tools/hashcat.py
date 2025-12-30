@@ -68,16 +68,23 @@ class HashcatTool(BaseToolWrapper):
         """Build hashcat command."""
         cmd = []
 
-        # Hash mode
+        # Hash mode - support both hash_mode (int) and hash_type (string)
+        hash_mode = options.get("hash_mode")
         hash_type = options.get("hash_type", "md5")
-        if hash_type in self.HASH_MODES:
+
+        if hash_mode is not None:
+            # Direct hash mode number from UI
+            cmd.extend(["-m", str(hash_mode)])
+        elif hash_type in self.HASH_MODES:
             cmd.extend(["-m", str(self.HASH_MODES[hash_type])])
-        elif hash_type.isdigit():
+        elif isinstance(hash_type, str) and hash_type.isdigit():
             cmd.extend(["-m", hash_type])
 
-        # Attack mode
+        # Attack mode - support both int and string
         attack_mode = options.get("attack_mode", "dictionary")
-        if attack_mode in self.ATTACK_MODES:
+        if isinstance(attack_mode, int):
+            cmd.extend(["-a", str(attack_mode)])
+        elif attack_mode in self.ATTACK_MODES:
             cmd.extend(["-a", str(self.ATTACK_MODES[attack_mode])])
 
         # Workload profile

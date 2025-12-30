@@ -25,17 +25,17 @@ class ReconScreen(Screen):
 
     #menu-panel {
         row-span: 2;
-        border: solid green;
+        border: solid $success;
         padding: 1;
     }
 
     #content-panel {
-        border: solid cyan;
+        border: solid $primary;
         padding: 1;
     }
 
     #output-panel {
-        border: solid yellow;
+        border: solid $warning;
         padding: 1;
     }
 
@@ -49,7 +49,7 @@ class ReconScreen(Screen):
     }
 
     .action-item:hover {
-        background: $accent;
+        background: $secondary;
     }
 
     #target-input {

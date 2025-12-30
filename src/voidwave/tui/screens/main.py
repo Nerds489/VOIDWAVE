@@ -14,6 +14,7 @@ from textual.widgets import (
 
 from voidwave.tui.widgets.tool_output import ToolOutput
 from voidwave.tui.widgets.status_panel import StatusPanel
+from voidwave.tui.widgets.sessions_panel import SessionsPanel
 
 VOIDWAVE_BANNER = """
 [cyan]██╗   ██╗ ██████╗ ██╗██████╗ ██╗    ██╗ █████╗ ██╗   ██╗███████╗[/]
@@ -92,7 +93,7 @@ class MainScreen(Screen):
                         yield StatusPanel(id="status-panel")
 
                     with TabPane("Sessions", id="sessions"):
-                        yield Static("Session management coming soon...")
+                        yield SessionsPanel(id="sessions-panel")
 
                 # Quick action buttons
                 with Horizontal(classes="quick-actions"):

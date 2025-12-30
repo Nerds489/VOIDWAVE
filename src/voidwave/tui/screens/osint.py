@@ -205,24 +205,24 @@ class OsintScreen(Screen):
             await tool.initialize()
 
             result = await tool.execute(target, {"silent": True})
-
-            if result.success:
-                data = result.data
-                for subdomain in data.get("subdomains", []):
-                    self._add_result("Subdomain", subdomain, "subfinder")
-                    self._write_output(f"Found: {subdomain}", "success")
-
-                summary = data.get("summary", {})
-                self._write_output(
-                    f"subfinder complete: {summary.get('total_subdomains', 0)} subdomains found",
-                    "success",
-                )
-            else:
-                self._write_output(f"subfinder failed: {result.errors}", "error")
-
         except Exception as e:
             logger.error(f"Subfinder error: {e}")
             self._write_output(f"Subfinder error: {e}", "error")
+            return
+
+        if result.success:
+            data = result.data
+            for subdomain in data.get("subdomains", []):
+                self._add_result("Subdomain", subdomain, "subfinder")
+                self._write_output(f"Found: {subdomain}", "success")
+
+            summary = data.get("summary", {})
+            self._write_output(
+                f"subfinder complete: {summary.get('total_subdomains', 0)} subdomains found",
+                "success",
+            )
+        else:
+            self._write_output(f"subfinder failed: {result.errors}", "error")
 
     async def action_amass(self) -> None:
         """Run amass for subdomain enumeration."""

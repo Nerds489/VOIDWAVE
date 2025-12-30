@@ -213,33 +213,33 @@ class ReconScreen(Screen):
             await tool.initialize()
 
             result = await tool.execute(target, {"tuning": "12b"})
-
-            if result.success:
-                data = result.data
-                # Process vulnerabilities
-                for vuln in data.get("vulnerabilities", []):
-                    desc = vuln.get("description", vuln.get("message", ""))
-                    osvdb = vuln.get("osvdb", "")
-                    self._add_result("Vuln", desc, f"OSVDB-{osvdb}" if osvdb else "nikto")
-                    self._write_output(f"[VULN] {desc}", "warning")
-
-                # Process server info
-                for info in data.get("info", []):
-                    msg = info.get("message", "")
-                    if "Server:" in msg or "server" in msg.lower():
-                        self._add_result("Server", msg, "nikto")
-                        self._write_output(msg)
-
-                self._write_output(
-                    f"Nikto complete: {data.get('summary', {}).get('total_vulnerabilities', 0)} vulns found",
-                    "success",
-                )
-            else:
-                self._write_output(f"Nikto failed: {result.errors}", "error")
-
         except Exception as e:
             logger.error(f"Nikto scan error: {e}")
             self._write_output(f"Nikto error: {e}", "error")
+            return
+
+        if result.success:
+            data = result.data
+            # Process vulnerabilities
+            for vuln in data.get("vulnerabilities", []):
+                desc = vuln.get("description", vuln.get("message", ""))
+                osvdb = vuln.get("osvdb", "")
+                self._add_result("Vuln", desc, f"OSVDB-{osvdb}" if osvdb else "nikto")
+                self._write_output(f"[VULN] {desc}", "warning")
+
+            # Process server info
+            for info in data.get("info", []):
+                msg = info.get("message", "")
+                if "Server:" in msg or "server" in msg.lower():
+                    self._add_result("Server", msg, "nikto")
+                    self._write_output(msg)
+
+            self._write_output(
+                f"Nikto complete: {data.get('summary', {}).get('total_vulnerabilities', 0)} vulns found",
+                "success",
+            )
+        else:
+            self._write_output(f"Nikto failed: {result.errors}", "error")
 
     async def action_gobuster_scan(self) -> None:
         """Run Gobuster directory brute force."""
@@ -261,27 +261,27 @@ class ReconScreen(Screen):
                 "wordlist": wordlist,
                 "status_codes": "200,204,301,302,307,401,403",
             })
-
-            if result.success:
-                data = result.data
-                for entry in data.get("results", []):
-                    path = entry.get("path", "")
-                    status = entry.get("status", "")
-                    size = entry.get("size", "")
-                    self._add_result("Directory", path, f"Status: {status}, Size: {size}")
-                    self._write_output(f"Found: {path} [{status}]", "success")
-
-                summary = data.get("summary", {})
-                self._write_output(
-                    f"Gobuster complete: {summary.get('total_found', 0)} directories found",
-                    "success",
-                )
-            else:
-                self._write_output(f"Gobuster failed: {result.errors}", "error")
-
         except Exception as e:
             logger.error(f"Gobuster scan error: {e}")
             self._write_output(f"Gobuster error: {e}", "error")
+            return
+
+        if result.success:
+            data = result.data
+            for entry in data.get("results", []):
+                path = entry.get("path", "")
+                status = entry.get("status", "")
+                size = entry.get("size", "")
+                self._add_result("Directory", path, f"Status: {status}, Size: {size}")
+                self._write_output(f"Found: {path} [{status}]", "success")
+
+            summary = data.get("summary", {})
+            self._write_output(
+                f"Gobuster complete: {summary.get('total_found', 0)} directories found",
+                "success",
+            )
+        else:
+            self._write_output(f"Gobuster failed: {result.errors}", "error")
 
     async def action_ffuf_scan(self) -> None:
         """Run FFUF fuzzing."""
@@ -306,28 +306,28 @@ class ReconScreen(Screen):
                 "wordlist": wordlist,
                 "match_codes": [200, 204, 301, 302, 307, 401, 403],
             })
-
-            if result.success:
-                data = result.data
-                for entry in data.get("results", []):
-                    input_val = entry.get("input", {}).get("FUZZ", "")
-                    url = entry.get("url", "")
-                    status = entry.get("status", "")
-                    length = entry.get("length", "")
-                    self._add_result("Fuzz", input_val, f"Status: {status}, Len: {length}")
-                    self._write_output(f"Found: {url} [{status}]", "success")
-
-                summary = data.get("summary", {})
-                self._write_output(
-                    f"FFUF complete: {summary.get('total_results', 0)} results found",
-                    "success",
-                )
-            else:
-                self._write_output(f"FFUF failed: {result.errors}", "error")
-
         except Exception as e:
             logger.error(f"FFUF scan error: {e}")
             self._write_output(f"FFUF error: {e}", "error")
+            return
+
+        if result.success:
+            data = result.data
+            for entry in data.get("results", []):
+                input_val = entry.get("input", {}).get("FUZZ", "")
+                url = entry.get("url", "")
+                status = entry.get("status", "")
+                length = entry.get("length", "")
+                self._add_result("Fuzz", input_val, f"Status: {status}, Len: {length}")
+                self._write_output(f"Found: {url} [{status}]", "success")
+
+            summary = data.get("summary", {})
+            self._write_output(
+                f"FFUF complete: {summary.get('total_results', 0)} results found",
+                "success",
+            )
+        else:
+            self._write_output(f"FFUF failed: {result.errors}", "error")
 
     async def action_dirb_scan(self) -> None:
         """Run Dirb directory scanner."""
@@ -369,37 +369,33 @@ class ReconScreen(Screen):
             result = await tool.execute(target, {
                 "severity": ["low", "medium", "high", "critical"],
             })
-
-            if result.success:
-                data = result.data
-                for finding in data.get("findings", []):
-                    template_name = finding.get("template_name", "")
-                    severity = finding.get("severity", "info").lower()
-                    matched_at = finding.get("matched_at", "")
-
-                    # Map severity to output level
-                    level = "info"
-                    if severity in ("critical", "high"):
-                        level = "error"
-                    elif severity == "medium":
-                        level = "warning"
-
-                    self._add_result("Vuln", template_name, f"[{severity}] {matched_at}")
-                    self._write_output(f"[{severity.upper()}] {template_name}: {matched_at}", level)
-
-                summary = data.get("summary", {})
-                self._write_output(
-                    f"Nuclei complete: {summary.get('total_findings', 0)} findings "
-                    f"(C:{summary.get('critical', 0)} H:{summary.get('high', 0)} "
-                    f"M:{summary.get('medium', 0)} L:{summary.get('low', 0)})",
-                    "success",
-                )
-            else:
-                self._write_output(f"Nuclei failed: {result.errors}", "error")
-
         except Exception as e:
             logger.error(f"Nuclei scan error: {e}")
             self._write_output(f"Nuclei error: {e}", "error")
+            return
+
+        if result.success:
+            data = result.data
+            level_map = {"critical": "error", "high": "error", "medium": "warning"}
+
+            for finding in data.get("findings", []):
+                template_name = finding.get("template_name", "")
+                severity = finding.get("severity", "info").lower()
+                matched_at = finding.get("matched_at", "")
+
+                level = level_map.get(severity, "info")
+                self._add_result("Vuln", template_name, f"[{severity}] {matched_at}")
+                self._write_output(f"[{severity.upper()}] {template_name}: {matched_at}", level)
+
+            summary = data.get("summary", {})
+            self._write_output(
+                f"Nuclei complete: {summary.get('total_findings', 0)} findings "
+                f"(C:{summary.get('critical', 0)} H:{summary.get('high', 0)} "
+                f"M:{summary.get('medium', 0)} L:{summary.get('low', 0)})",
+                "success",
+            )
+        else:
+            self._write_output(f"Nuclei failed: {result.errors}", "error")
 
     async def action_whatweb_scan(self) -> None:
         """Run WhatWeb fingerprinting."""
@@ -416,32 +412,32 @@ class ReconScreen(Screen):
             await tool.initialize()
 
             result = await tool.execute(target, {"aggression": 3})
-
-            if result.success:
-                data = result.data
-                for tech in data.get("technologies", []):
-                    name = tech.get("name", "")
-                    version = tech.get("version", "")
-                    details = tech.get("details", "")
-
-                    display = name
-                    if version:
-                        display = f"{name}/{version}"
-
-                    self._add_result("Tech", display, details or "whatweb")
-                    self._write_output(f"Detected: {display}", "success")
-
-                summary = data.get("summary", {})
-                self._write_output(
-                    f"WhatWeb complete: {summary.get('total_technologies', 0)} technologies detected",
-                    "success",
-                )
-            else:
-                self._write_output(f"WhatWeb failed: {result.errors}", "error")
-
         except Exception as e:
             logger.error(f"WhatWeb scan error: {e}")
             self._write_output(f"WhatWeb error: {e}", "error")
+            return
+
+        if result.success:
+            data = result.data
+            for tech in data.get("technologies", []):
+                name = tech.get("name", "")
+                version = tech.get("version", "")
+                details = tech.get("details", "")
+
+                display = name
+                if version:
+                    display = f"{name}/{version}"
+
+                self._add_result("Tech", display, details or "whatweb")
+                self._write_output(f"Detected: {display}", "success")
+
+            summary = data.get("summary", {})
+            self._write_output(
+                f"WhatWeb complete: {summary.get('total_technologies', 0)} technologies detected",
+                "success",
+            )
+        else:
+            self._write_output(f"WhatWeb failed: {result.errors}", "error")
 
     async def action_wpscan_scan(self) -> None:
         """Run WPScan for WordPress sites."""

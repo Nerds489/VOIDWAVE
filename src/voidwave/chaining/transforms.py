@@ -237,6 +237,60 @@ def to_port_list(ports: list[int]) -> str:
     return ",".join(str(p) for p in sorted(set(ports)))
 
 
+# Additional transforms for chain bindings
+
+def first_ssh_host(hosts: list[dict[str, Any]]) -> str | None:
+    """Get first SSH host as ip:port string."""
+    ssh_hosts = extract_services(hosts, "ssh")
+    return ssh_hosts[0] if ssh_hosts else None
+
+
+def first_http_host(hosts: list[dict[str, Any]]) -> str | None:
+    """Get first HTTP host as ip:port string."""
+    http_hosts = extract_services(hosts, "http")
+    return http_hosts[0] if http_hosts else None
+
+
+def first_ftp_host(hosts: list[dict[str, Any]]) -> str | None:
+    """Get first FTP host as ip:port string."""
+    ftp_hosts = extract_services(hosts, "ftp")
+    return ftp_hosts[0] if ftp_hosts else None
+
+
+def first_network_bssid(networks: list[dict[str, Any]]) -> str | None:
+    """Get BSSID of first network."""
+    return networks[0].get("bssid") if networks else None
+
+
+def first_network_channel(networks: list[dict[str, Any]]) -> int | None:
+    """Get channel of first network."""
+    return networks[0].get("channel") if networks else None
+
+
+def ports_to_comma_list(hosts: list[dict[str, Any]]) -> str:
+    """Extract open ports from hosts and return comma-separated string."""
+    ports = extract_ports(hosts)
+    return ",".join(str(p) for p in ports) if ports else "1-1000"
+
+
+def hosts_to_comma_ips(hosts: list[dict[str, Any]]) -> str | None:
+    """Extract IPs from hosts and return comma-separated string."""
+    ips = flatten_ips(hosts)
+    return ",".join(ips) if ips else None
+
+
+def smb_hosts_joined(hosts: list[dict[str, Any]]) -> str | None:
+    """Get SMB hosts as comma-separated string."""
+    smb = extract_services(hosts, "microsoft-ds")
+    return ",".join(smb) if smb else None
+
+
+def ssh_hosts_joined(hosts: list[dict[str, Any]]) -> str | None:
+    """Get SSH hosts as comma-separated string."""
+    ssh = extract_services(hosts, "ssh")
+    return ",".join(ssh) if ssh else None
+
+
 # Registry of named transforms for use in DataBinding
 TRANSFORMS: dict[str, Callable[..., Any]] = {
     "flatten_ips": flatten_ips,
@@ -250,15 +304,27 @@ TRANSFORMS: dict[str, Callable[..., Any]] = {
     "count": count,
     "to_cidr": to_cidr,
     "to_port_list": to_port_list,
-    # Service extractors
+    # Host/IP transforms
+    "hosts_to_ips": hosts_to_comma_ips,
+    "ports_csv": ports_to_comma_list,
+    # Service extractors (return list)
     "ssh_hosts": lambda h: extract_services(h, "ssh"),
     "http_hosts": lambda h: extract_services(h, "http"),
     "https_hosts": lambda h: extract_services(h, "https"),
     "ftp_hosts": lambda h: extract_services(h, "ftp"),
     "smb_hosts": lambda h: extract_services(h, "smb"),
     "rdp_hosts": lambda h: extract_services(h, "ms-wbt-server"),
+    # First service host (return single string)
+    "first_ssh": first_ssh_host,
+    "first_http": first_http_host,
+    "first_ftp": first_ftp_host,
+    # Joined service hosts
+    "ssh_hosts_csv": ssh_hosts_joined,
+    "smb_hosts_csv": smb_hosts_joined,
     # Wireless
     "networks_bssids": networks_to_bssids,
+    "first_bssid": first_network_bssid,
+    "first_channel": first_network_channel,
     "wpa_networks": lambda n: networks_by_encryption(n, "WPA"),
     "wep_networks": lambda n: networks_by_encryption(n, "WEP"),
     "open_networks": lambda n: networks_by_encryption(n, "OPN"),

@@ -25,11 +25,23 @@ class StepStatus(str, Enum):
     FAILED = "failed"
 
 
+# Type alias for transform specification
+TransformSpec = Callable[[Any], Any] | str | None
+
+
 @dataclass
 class DataBinding:
     """Maps output from one step to input of another.
 
     Example:
+        DataBinding(
+            source_step="fast_scan",
+            source_path="hosts[*].ip",
+            target_option="target",
+            transform="join",  # Named transform from TRANSFORMS registry
+        )
+
+        # Or with a callable:
         DataBinding(
             source_step="fast_scan",
             source_path="hosts[*].ip",
@@ -41,7 +53,7 @@ class DataBinding:
     source_step: str
     source_path: str
     target_option: str
-    transform: Callable[[Any], Any] | None = None
+    transform: TransformSpec = None
     required: bool = True
     default: Any = None
 

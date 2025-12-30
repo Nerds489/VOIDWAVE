@@ -8,7 +8,6 @@ from voidwave.chaining.models import (
     OnErrorBehavior,
 )
 from voidwave.chaining.registry import chain_registry
-from voidwave.chaining.transforms import flatten_ips, to_port_list
 
 
 # Fast-to-Detailed Scan Chain
@@ -37,16 +36,16 @@ fast_to_detailed_chain = ChainDefinition(
             description="Detailed service enumeration",
             target_binding=DataBinding(
                 source_step="fast_scan",
-                source_path="hosts[*].ip",
+                source_path="hosts",
                 target_option="target",
-                transform=lambda ips: ",".join(ips) if ips else None,
+                transform="hosts_to_ips",
             ),
             option_bindings=[
                 DataBinding(
                     source_step="fast_scan",
-                    source_path="hosts[*].ports[*].port",
+                    source_path="hosts",
                     target_option="ports",
-                    transform=lambda ports: ",".join(str(p) for p in set(ports)) if ports else "1-1000",
+                    transform="ports_csv",
                     required=False,
                     default="1-1000",
                 ),
@@ -92,16 +91,16 @@ vuln_scan_chain = ChainDefinition(
             description="Service version detection",
             target_binding=DataBinding(
                 source_step="port_scan",
-                source_path="hosts[?state==up].ip",
+                source_path="hosts",
                 target_option="target",
-                transform=lambda ips: ",".join(ips) if ips else None,
+                transform="hosts_to_ips",
             ),
             option_bindings=[
                 DataBinding(
                     source_step="port_scan",
-                    source_path="hosts[*].ports[?state==open].port",
+                    source_path="hosts",
                     target_option="ports",
-                    transform=lambda ports: ",".join(str(p) for p in set(ports)) if ports else None,
+                    transform="ports_csv",
                 ),
             ],
             options={
@@ -122,9 +121,9 @@ vuln_scan_chain = ChainDefinition(
             description="Vulnerability scanning",
             target_binding=DataBinding(
                 source_step="service_scan",
-                source_path="hosts[*].ip",
+                source_path="hosts",
                 target_option="target",
-                transform=lambda ips: ",".join(ips) if ips else None,
+                transform="hosts_to_ips",
             ),
             options={
                 "scan_type": "vuln",
@@ -167,16 +166,16 @@ quick_recon_chain = ChainDefinition(
             description="Service detection on open ports",
             target_binding=DataBinding(
                 source_step="quick_scan",
-                source_path="hosts[*].ip",
+                source_path="hosts",
                 target_option="target",
-                transform=lambda ips: ",".join(ips) if ips else None,
+                transform="hosts_to_ips",
             ),
             option_bindings=[
                 DataBinding(
                     source_step="quick_scan",
-                    source_path="hosts[*].ports[?state==open].port",
+                    source_path="hosts",
                     target_option="ports",
-                    transform=lambda ports: ",".join(str(p) for p in set(ports)) if ports else None,
+                    transform="ports_csv",
                 ),
             ],
             options={
@@ -220,9 +219,9 @@ stealth_scan_chain = ChainDefinition(
             description="Stealthy service detection",
             target_binding=DataBinding(
                 source_step="stealth_discovery",
-                source_path="hosts[?state==up].ip",
+                source_path="hosts",
                 target_option="target",
-                transform=lambda ips: ",".join(ips) if ips else None,
+                transform="hosts_to_ips",
             ),
             options={
                 "scan_type": "stealth",

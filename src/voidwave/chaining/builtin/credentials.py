@@ -8,7 +8,6 @@ from voidwave.chaining.models import (
     OnErrorBehavior,
 )
 from voidwave.chaining.registry import chain_registry
-from voidwave.chaining.transforms import extract_services
 
 
 # SSH Bruteforce Chain
@@ -37,7 +36,7 @@ ssh_bruteforce_chain = ChainDefinition(
                 source_step="find_ssh",
                 source_path="hosts",
                 target_option="target",
-                transform=lambda hosts: extract_services(hosts, "ssh")[0] if extract_services(hosts, "ssh") else None,
+                transform="first_ssh",
             ),
             options={
                 "service": "ssh",
@@ -84,7 +83,7 @@ web_bruteforce_chain = ChainDefinition(
                 source_step="find_web",
                 source_path="hosts",
                 target_option="target",
-                transform=lambda hosts: extract_services(hosts, "http")[0] if extract_services(hosts, "http") else None,
+                transform="first_http",
             ),
             options={
                 "service": "http-get",
@@ -155,7 +154,7 @@ credential_spray_chain = ChainDefinition(
                 source_step="discover_services",
                 source_path="hosts",
                 target_option="target",
-                transform=lambda hosts: ",".join(extract_services(hosts, "ssh")) if extract_services(hosts, "ssh") else None,
+                transform="ssh_hosts_csv",
             ),
             options={
                 "service": "ssh",
@@ -178,7 +177,7 @@ credential_spray_chain = ChainDefinition(
                 source_step="discover_services",
                 source_path="hosts",
                 target_option="target",
-                transform=lambda hosts: ",".join(extract_services(hosts, "microsoft-ds")) if extract_services(hosts, "microsoft-ds") else None,
+                transform="smb_hosts_csv",
             ),
             options={
                 "service": "smb",
@@ -225,7 +224,7 @@ ftp_bruteforce_chain = ChainDefinition(
                 source_step="find_ftp",
                 source_path="hosts",
                 target_option="target",
-                transform=lambda hosts: extract_services(hosts, "ftp")[0] if extract_services(hosts, "ftp") else None,
+                transform="first_ftp",
             ),
             options={
                 "service": "ftp",

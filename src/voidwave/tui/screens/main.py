@@ -40,6 +40,7 @@ class MenuCategory:
 MENU_CATEGORIES = [
     MenuCategory("Wireless", "📡", "wireless", "WiFi attacks, monitor mode, handshake capture"),
     MenuCategory("Scanning", "🔍", "scan", "Port scanning, service enumeration"),
+    MenuCategory("Chains", "🔗", "chains", "Multi-step attack workflows"),
     MenuCategory("Credentials", "🔑", "credentials", "Password cracking, hash attacks"),
     MenuCategory("OSINT", "🌐", "osint", "Open source intelligence gathering"),
     MenuCategory("Recon", "🎯", "recon", "Network discovery, host enumeration"),
@@ -57,14 +58,15 @@ class MainScreen(Screen):
     BINDINGS = [
         ("1", "menu_1", "Wireless"),
         ("2", "menu_2", "Scanning"),
-        ("3", "menu_3", "Credentials"),
-        ("4", "menu_4", "OSINT"),
-        ("5", "menu_5", "Recon"),
-        ("6", "menu_6", "Traffic"),
-        ("7", "menu_7", "Exploit"),
-        ("8", "menu_8", "Stress"),
-        ("9", "menu_9", "Status"),
-        ("0", "menu_0", "Settings"),
+        ("3", "menu_3", "Chains"),
+        ("4", "menu_4", "Credentials"),
+        ("5", "menu_5", "OSINT"),
+        ("6", "menu_6", "Recon"),
+        ("7", "menu_7", "Traffic"),
+        ("8", "menu_8", "Exploit"),
+        ("9", "menu_9", "Stress"),
+        ("0", "menu_10", "Status"),
+        ("-", "menu_11", "Settings"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -122,6 +124,7 @@ class MainScreen(Screen):
         screen_map = {
             "wireless": "voidwave.tui.screens.wireless:WirelessScreen",
             "scan": "voidwave.tui.screens.scan:ScanScreen",
+            "chains": "voidwave.tui.screens.chains:ChainsScreen",
             "credentials": "voidwave.tui.screens.credentials:CredentialsScreen",
             "osint": "voidwave.tui.screens.osint:OsintScreen",
             "recon": "voidwave.tui.screens.recon:ReconScreen",
@@ -178,25 +181,28 @@ class MainScreen(Screen):
         self.run_worker(self._navigate_to_screen("scan"))
 
     def action_menu_3(self) -> None:
-        self.run_worker(self._navigate_to_screen("credentials"))
+        self.run_worker(self._navigate_to_screen("chains"))
 
     def action_menu_4(self) -> None:
-        self.run_worker(self._navigate_to_screen("osint"))
+        self.run_worker(self._navigate_to_screen("credentials"))
 
     def action_menu_5(self) -> None:
-        self.run_worker(self._navigate_to_screen("recon"))
+        self.run_worker(self._navigate_to_screen("osint"))
 
     def action_menu_6(self) -> None:
-        self.run_worker(self._navigate_to_screen("traffic"))
+        self.run_worker(self._navigate_to_screen("recon"))
 
     def action_menu_7(self) -> None:
-        self.run_worker(self._navigate_to_screen("exploit"))
+        self.run_worker(self._navigate_to_screen("traffic"))
 
     def action_menu_8(self) -> None:
-        self.run_worker(self._navigate_to_screen("stress"))
+        self.run_worker(self._navigate_to_screen("exploit"))
 
     def action_menu_9(self) -> None:
+        self.run_worker(self._navigate_to_screen("stress"))
+
+    def action_menu_10(self) -> None:
         self.run_worker(self._navigate_to_screen("status"))
 
-    def action_menu_0(self) -> None:
+    def action_menu_11(self) -> None:
         self.run_worker(self._navigate_to_screen("settings"))

@@ -61,6 +61,16 @@ class TUIEventBridge:
         self.bus.on(Events.STATUS_UPDATE, self._on_status_update)
         self.bus.on(Events.NOTIFICATION, self._on_notification)
 
+        # Chain events
+        self.bus.on(Events.CHAIN_STARTED, self._on_chain_started)
+        self.bus.on(Events.CHAIN_STEP_STARTED, self._on_chain_step_started)
+        self.bus.on(Events.CHAIN_STEP_COMPLETED, self._on_chain_step_completed)
+        self.bus.on(Events.CHAIN_STEP_FAILED, self._on_chain_step_failed)
+        self.bus.on(Events.CHAIN_STEP_SKIPPED, self._on_chain_step_skipped)
+        self.bus.on(Events.CHAIN_COMPLETED, self._on_chain_completed)
+        self.bus.on(Events.CHAIN_FAILED, self._on_chain_failed)
+        self.bus.on(Events.CHAIN_CANCELLED, self._on_chain_cancelled)
+
         self._registered = True
         logger.info("TUI event bridge connected")
 
@@ -90,6 +100,15 @@ class TUIEventBridge:
 
         self.bus.off(Events.STATUS_UPDATE, self._on_status_update)
         self.bus.off(Events.NOTIFICATION, self._on_notification)
+
+        self.bus.off(Events.CHAIN_STARTED, self._on_chain_started)
+        self.bus.off(Events.CHAIN_STEP_STARTED, self._on_chain_step_started)
+        self.bus.off(Events.CHAIN_STEP_COMPLETED, self._on_chain_step_completed)
+        self.bus.off(Events.CHAIN_STEP_FAILED, self._on_chain_step_failed)
+        self.bus.off(Events.CHAIN_STEP_SKIPPED, self._on_chain_step_skipped)
+        self.bus.off(Events.CHAIN_COMPLETED, self._on_chain_completed)
+        self.bus.off(Events.CHAIN_FAILED, self._on_chain_failed)
+        self.bus.off(Events.CHAIN_CANCELLED, self._on_chain_cancelled)
 
         self._registered = False
         logger.info("TUI event bridge disconnected")
@@ -298,3 +317,91 @@ class TUIEventBridge:
             self.app.notify(message, severity=severity)
         except Exception as e:
             logger.warning(f"Failed to show notification: {e}")
+
+    # --------------------------------------------------------------------------
+    # Chain Handlers
+    # --------------------------------------------------------------------------
+
+    async def _on_chain_started(self, data: dict) -> None:
+        """Handle chain started event."""
+        chain_name = data.get("chain_name", "Unknown")
+        self.app.call_from_thread(self._update_tool_output, "started", {
+            "tool": f"Chain: {chain_name}",
+            "target": data.get("target", ""),
+        })
+
+    async def _on_chain_step_started(self, data: dict) -> None:
+        """Handle chain step started event."""
+        step_id = data.get("step_id", "")
+        tool = data.get("tool", "")
+        self.app.call_from_thread(self._update_tool_output, "output", {
+            "tool": "chain",
+            "line": f"Step started: {step_id} ({tool})",
+            "level": "info",
+        })
+
+    async def _on_chain_step_completed(self, data: dict) -> None:
+        """Handle chain step completed event."""
+        step_id = data.get("step_id", "")
+        duration = data.get("duration", 0)
+        self.app.call_from_thread(self._update_tool_output, "output", {
+            "tool": "chain",
+            "line": f"Step completed: {step_id} ({duration:.1f}s)",
+            "level": "success",
+        })
+
+    async def _on_chain_step_failed(self, data: dict) -> None:
+        """Handle chain step failed event."""
+        step_id = data.get("step_id", "")
+        error = data.get("error", "Unknown error")
+        self.app.call_from_thread(self._update_tool_output, "output", {
+            "tool": "chain",
+            "line": f"Step failed: {step_id} - {error}",
+            "level": "error",
+        })
+
+    async def _on_chain_step_skipped(self, data: dict) -> None:
+        """Handle chain step skipped event."""
+        step_id = data.get("step_id", "")
+        reason = data.get("reason", "Condition not met")
+        self.app.call_from_thread(self._update_tool_output, "output", {
+            "tool": "chain",
+            "line": f"Step skipped: {step_id} - {reason}",
+            "level": "warning",
+        })
+
+    async def _on_chain_completed(self, data: dict) -> None:
+        """Handle chain completed event."""
+        chain_id = data.get("chain_id", "")
+        duration = data.get("duration", 0)
+        self.app.call_from_thread(self._update_tool_output, "completed", {
+            "tool": f"Chain: {chain_id}",
+            "exit_code": 0,
+            "duration": duration,
+        })
+        self.app.call_from_thread(self._show_notification, "notification", {
+            "message": f"Chain completed: {chain_id}",
+            "severity": "information",
+        })
+
+    async def _on_chain_failed(self, data: dict) -> None:
+        """Handle chain failed event."""
+        chain_id = data.get("chain_id", "")
+        error = data.get("error", "Unknown error")
+        self.app.call_from_thread(self._update_tool_output, "failed", {
+            "tool": f"Chain: {chain_id}",
+            "error": error,
+        })
+        self.app.call_from_thread(self._show_notification, "notification", {
+            "message": f"Chain failed: {chain_id}",
+            "severity": "error",
+        })
+
+    async def _on_chain_cancelled(self, data: dict) -> None:
+        """Handle chain cancelled event."""
+        chain_id = data.get("chain_id", "")
+        self.app.call_from_thread(self._update_tool_output, "output", {
+            "tool": "chain",
+            "line": f"Chain cancelled: {chain_id}",
+            "level": "warning",
+        })

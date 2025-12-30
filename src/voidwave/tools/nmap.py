@@ -107,6 +107,16 @@ class NmapTool(BaseToolWrapper):
         if scripts:
             cmd.extend(["--script", ",".join(scripts)])
 
+        # Skip host discovery (-Pn)
+        if options.get("skip_discovery", False):
+            if "-Pn" not in cmd:
+                cmd.append("-Pn")
+
+        # Extra arguments from UI
+        extra_args = options.get("extra_args", [])
+        if extra_args:
+            cmd.extend(extra_args)
+
         # XML output for parsing
         self._output_file = Path(NamedTemporaryFile(suffix=".xml", delete=False).name)
         cmd.extend(["-oX", str(self._output_file)])

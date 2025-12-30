@@ -1,8 +1,20 @@
-"""Session management for VOIDWAVE.
+"""Session management for VOIDWAVE."""
 
-This module will contain:
-- manager.py - Session lifecycle
-- persistence.py - Session serialization
-"""
+from voidwave.sessions.manager import SessionManager, get_session_manager
+from voidwave.sessions.models import (
+    Session,
+    SessionConfig,
+    SessionMetadata,
+    SessionStatus,
+    SessionSummary,
+)
 
-__all__: list[str] = []
+__all__ = [
+    "SessionManager",
+    "get_session_manager",
+    "Session",
+    "SessionConfig",
+    "SessionMetadata",
+    "SessionStatus",
+    "SessionSummary",
+]

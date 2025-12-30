@@ -169,7 +169,7 @@ class FirstRunWizard(Screen):
     #wizard-container {
         width: 90%;
         height: 90%;
-        border: solid green;
+        border: solid $success;
         padding: 1;
     }
 
@@ -205,27 +205,27 @@ class FirstRunWizard(Screen):
 
     .logo {
         text-align: center;
-        color: green;
+        color: $success;
     }
 
     .warning-box {
-        border: solid red;
+        border: solid $error;
         padding: 1;
         margin: 1;
     }
 
     .info-box {
-        border: solid cyan;
+        border: solid $primary;
         padding: 1;
         margin: 1;
     }
 
     .success-text {
-        color: green;
+        color: $success;
     }
 
     .error-text {
-        color: red;
+        color: $error;
     }
 
     .category-box {

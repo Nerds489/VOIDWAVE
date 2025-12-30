@@ -1,11 +1,15 @@
 """Gobuster directory/DNS bruteforce wrapper."""
+import json
 import re
 from typing import Any, ClassVar
 
 from pydantic import BaseModel
 
+from voidwave.core.logging import get_logger
 from voidwave.plugins.base import Capability, PluginMetadata, PluginType
 from voidwave.tools.base import BaseToolWrapper
+
+logger = get_logger(__name__)
 
 
 class GobusterConfig(BaseModel):
@@ -97,10 +101,13 @@ class GobusterTool(BaseToolWrapper):
             if pattern:
                 cmd.extend(["-p", pattern])
 
+        # JSON output for reliable parsing
+        cmd.append("--json")
+
         return cmd
 
     def parse_output(self, output: str) -> dict[str, Any]:
-        """Parse gobuster output."""
+        """Parse gobuster JSON output."""
         results = {
             "directories": [],
             "files": [],
@@ -110,57 +117,48 @@ class GobusterTool(BaseToolWrapper):
 
         for line in output.splitlines():
             line = line.strip()
-            if not line or line.startswith("="):
+            if not line:
                 continue
 
-            # Directory/file results: /path (Status: 200) [Size: 1234]
-            dir_match = re.match(
-                r"(/\S+)\s+\(Status:\s*(\d+)\)(?:\s+\[Size:\s*(\d+)\])?",
-                line,
-            )
-            if dir_match:
-                entry = {
-                    "path": dir_match.group(1),
-                    "status": int(dir_match.group(2)),
-                }
-                if dir_match.group(3):
-                    entry["size"] = int(dir_match.group(3))
+            # Parse JSON lines
+            try:
+                data = json.loads(line)
+                status = data.get("status", 0)
+                path = data.get("path", "")
+                url = data.get("url", "")
+                size = data.get("size", 0)
 
-                # Classify as file or directory
-                if "." in dir_match.group(1).split("/")[-1]:
-                    results["files"].append(entry)
-                else:
-                    results["directories"].append(entry)
-                continue
+                # Dir mode results
+                if path or url:
+                    entry = {
+                        "path": path,
+                        "url": url,
+                        "status": status,
+                        "size": size,
+                    }
+                    # Classify as file or directory
+                    check_path = path or url.split("/")[-1]
+                    if "." in check_path.split("/")[-1]:
+                        results["files"].append(entry)
+                    else:
+                        results["directories"].append(entry)
+                    continue
 
-            # Full URL results: http://example.com/path (Status: 200)
-            url_match = re.match(
-                r"(https?://\S+)\s+\(Status:\s*(\d+)\)(?:\s+\[Size:\s*(\d+)\])?",
-                line,
-            )
-            if url_match:
-                entry = {
-                    "url": url_match.group(1),
-                    "status": int(url_match.group(2)),
-                }
-                if url_match.group(3):
-                    entry["size"] = int(url_match.group(3))
-                results["directories"].append(entry)
-                continue
+                # DNS mode results
+                if "host" in data:
+                    results["subdomains"].append({"subdomain": data["host"]})
+                    continue
 
-            # DNS results: Found: subdomain.example.com
-            dns_match = re.match(r"Found:\s*(\S+)", line)
-            if dns_match:
-                results["subdomains"].append({"subdomain": dns_match.group(1)})
-                continue
+                # Vhost mode results
+                if "vhost" in data:
+                    results["vhosts"].append({
+                        "vhost": data["vhost"],
+                        "status": status,
+                    })
 
-            # Vhost results: Found: vhost.example.com (Status: 200)
-            vhost_match = re.match(r"Found:\s*(\S+)\s+\(Status:\s*(\d+)\)", line)
-            if vhost_match:
-                results["vhosts"].append({
-                    "vhost": vhost_match.group(1),
-                    "status": int(vhost_match.group(2)),
-                })
+            except json.JSONDecodeError:
+                # Fallback to text parsing for non-JSON lines
+                self._parse_text_line(line, results)
 
         # Summary
         results["summary"] = {
@@ -171,6 +169,35 @@ class GobusterTool(BaseToolWrapper):
         }
 
         return results
+
+    def _parse_text_line(self, line: str, results: dict[str, Any]) -> None:
+        """Fallback text parsing for non-JSON output."""
+        if line.startswith("=") or not line:
+            return
+
+        # Directory/file results: /path (Status: 200) [Size: 1234]
+        dir_match = re.match(
+            r"(/\S+)\s+\(Status:\s*(\d+)\)(?:\s+\[Size:\s*(\d+)\])?",
+            line,
+        )
+        if dir_match:
+            entry = {
+                "path": dir_match.group(1),
+                "status": int(dir_match.group(2)),
+            }
+            if dir_match.group(3):
+                entry["size"] = int(dir_match.group(3))
+
+            if "." in dir_match.group(1).split("/")[-1]:
+                results["files"].append(entry)
+            else:
+                results["directories"].append(entry)
+            return
+
+        # DNS results: Found: subdomain.example.com
+        dns_match = re.match(r"Found:\s*(\S+)", line)
+        if dns_match:
+            results["subdomains"].append({"subdomain": dns_match.group(1)})
 
     async def dir_scan(self, target: str, wordlist: str | None = None) -> dict[str, Any]:
         """Perform directory enumeration."""

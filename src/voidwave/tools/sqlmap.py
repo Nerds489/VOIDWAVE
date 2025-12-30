@@ -7,8 +7,11 @@ from typing import Any, ClassVar
 
 from pydantic import BaseModel
 
+from voidwave.core.logging import get_logger
 from voidwave.plugins.base import Capability, PluginMetadata, PluginType
 from voidwave.tools.base import BaseToolWrapper
+
+logger = get_logger(__name__)
 
 
 class SqlmapConfig(BaseModel):
@@ -268,8 +271,8 @@ class SqlmapTool(BaseToolWrapper):
                                 "file": csv_file.name,
                                 "content": content[:5000],  # Limit size
                             })
-                    except Exception:
-                        pass
+                    except OSError as e:
+                        logger.warning(f"Could not read sqlmap output file {csv_file.name}: {e}")
 
         # Check for various success indicators
         success_indicators = [

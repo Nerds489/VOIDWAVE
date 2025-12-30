@@ -151,13 +151,13 @@ subdomain_enum_chain = ChainDefinition(
 )
 
 
-# CMS Detection Chain
+# WordPress Detection Chain
 cms_detect_chain = ChainDefinition(
-    id="cms_detect",
-    name="CMS Detection & Scanning",
-    description="Detect CMS installations and run specialized scans",
+    id="wordpress_detect",
+    name="WordPress Detection & Scanning",
+    description="Detect WordPress installations and run specialized scans",
     target_type="url",
-    tags=["recon", "cms", "wordpress", "fingerprinting"],
+    tags=["recon", "wordpress", "cms", "fingerprinting"],
     steps=[
         ChainStep(
             id="fingerprint",

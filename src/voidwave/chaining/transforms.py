@@ -291,6 +291,174 @@ def ssh_hosts_joined(hosts: list[dict[str, Any]]) -> str | None:
     return ",".join(ssh) if ssh else None
 
 
+# Web/URL transforms
+
+def hosts_to_urls(hosts: list[dict[str, Any]], scheme: str = "http") -> list[str]:
+    """Convert hosts to URLs.
+
+    Args:
+        hosts: List of host dicts with 'ip' and optional 'ports'
+        scheme: URL scheme (http or https)
+
+    Returns:
+        List of URL strings
+    """
+    urls = []
+    for host in hosts:
+        ip = host.get("ip")
+        if not ip:
+            continue
+        for port in host.get("ports", []):
+            if port.get("state") != "open":
+                continue
+            port_num = port.get("port")
+            service = port.get("service", "")
+            if service in ("http", "http-alt") or port_num in (80, 8080, 8000):
+                urls.append(f"http://{ip}:{port_num}")
+            elif service in ("https", "ssl/http") or port_num in (443, 8443):
+                urls.append(f"https://{ip}:{port_num}")
+        if not host.get("ports"):
+            urls.append(f"{scheme}://{ip}")
+    return urls if urls else [f"{scheme}://{hosts[0].get('ip')}"] if hosts else []
+
+
+def first_http_url(hosts: list[dict[str, Any]]) -> str | None:
+    """Get first HTTP URL from hosts."""
+    urls = hosts_to_urls(hosts)
+    return urls[0] if urls else None
+
+
+def filter_web_ports(hosts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Filter hosts to only include web ports.
+
+    Args:
+        hosts: List of host dicts
+
+    Returns:
+        Hosts with only web ports
+    """
+    web_ports = {80, 443, 8080, 8443, 8000, 8888, 9000}
+    result = []
+    for host in hosts:
+        web_host_ports = [
+            p for p in host.get("ports", [])
+            if p.get("port") in web_ports or p.get("service") in ("http", "https", "http-alt", "ssl/http")
+        ]
+        if web_host_ports:
+            result.append({**host, "ports": web_host_ports})
+    return result
+
+
+def extract_subdomains(subdomain_data: dict[str, Any]) -> list[str]:
+    """Extract subdomain list from subfinder results.
+
+    Args:
+        subdomain_data: Subfinder result dict
+
+    Returns:
+        List of subdomain strings
+    """
+    if isinstance(subdomain_data, dict):
+        return subdomain_data.get("unique_hosts", [])
+    return []
+
+
+def subdomains_to_targets(subdomain_data: dict[str, Any]) -> str:
+    """Convert subdomains to comma-separated target list.
+
+    Args:
+        subdomain_data: Subfinder result dict
+
+    Returns:
+        Comma-separated subdomain string
+    """
+    subs = extract_subdomains(subdomain_data)
+    return ",".join(subs) if subs else ""
+
+
+def first_subdomain(subdomain_data: dict[str, Any]) -> str | None:
+    """Get first subdomain from results."""
+    subs = extract_subdomains(subdomain_data)
+    return subs[0] if subs else None
+
+
+def extract_vulns_by_severity(
+    nuclei_data: dict[str, Any],
+    min_severity: str = "medium"
+) -> list[dict[str, Any]]:
+    """Extract vulnerabilities above minimum severity.
+
+    Args:
+        nuclei_data: Nuclei result dict
+        min_severity: Minimum severity level
+
+    Returns:
+        List of vulnerability findings
+    """
+    severity_order = ["info", "low", "medium", "high", "critical"]
+    min_idx = severity_order.index(min_severity.lower()) if min_severity.lower() in severity_order else 2
+
+    findings = nuclei_data.get("findings", [])
+    return [
+        f for f in findings
+        if severity_order.index(f.get("severity", "info").lower()) >= min_idx
+    ]
+
+
+def extract_directories(gobuster_data: dict[str, Any]) -> list[str]:
+    """Extract discovered directories from gobuster results.
+
+    Args:
+        gobuster_data: Gobuster result dict
+
+    Returns:
+        List of directory paths
+    """
+    dirs = gobuster_data.get("directories", [])
+    return [d.get("path") or d.get("url", "") for d in dirs]
+
+
+def extract_technologies(whatweb_data: dict[str, Any]) -> list[str]:
+    """Extract technology names from whatweb results.
+
+    Args:
+        whatweb_data: WhatWeb result dict
+
+    Returns:
+        List of technology names
+    """
+    techs = whatweb_data.get("technologies", [])
+    return [t.get("name", "") for t in techs if t.get("name")]
+
+
+def detect_cms(whatweb_data: dict[str, Any]) -> str | None:
+    """Detect CMS from whatweb fingerprint.
+
+    Args:
+        whatweb_data: WhatWeb result dict
+
+    Returns:
+        CMS name if detected
+    """
+    cms_keywords = {
+        "wordpress": "WordPress",
+        "joomla": "Joomla",
+        "drupal": "Drupal",
+        "magento": "Magento",
+        "shopify": "Shopify",
+        "woocommerce": "WooCommerce",
+        "prestashop": "PrestaShop",
+        "typo3": "TYPO3",
+    }
+    techs = extract_technologies(whatweb_data)
+    for tech in techs:
+        tech_lower = tech.lower()
+        for keyword, cms_name in cms_keywords.items():
+            if keyword in tech_lower:
+                return cms_name
+    return None
+
+
 # Registry of named transforms for use in DataBinding
 TRANSFORMS: dict[str, Callable[..., Any]] = {
     "flatten_ips": flatten_ips,
@@ -333,6 +501,22 @@ TRANSFORMS: dict[str, Callable[..., Any]] = {
     "creds_userpass": credentials_to_userpass,
     # Port extraction
     "extract_ports": extract_ports,
+    # Web/URL transforms
+    "hosts_to_urls": hosts_to_urls,
+    "first_http_url": first_http_url,
+    "filter_web_ports": filter_web_ports,
+    # Subdomain transforms
+    "extract_subdomains": extract_subdomains,
+    "subdomains_targets": subdomains_to_targets,
+    "first_subdomain": first_subdomain,
+    # Vulnerability transforms
+    "critical_vulns": lambda d: extract_vulns_by_severity(d, "critical"),
+    "high_vulns": lambda d: extract_vulns_by_severity(d, "high"),
+    "medium_vulns": lambda d: extract_vulns_by_severity(d, "medium"),
+    # Web discovery transforms
+    "extract_directories": extract_directories,
+    "extract_technologies": extract_technologies,
+    "detect_cms": detect_cms,
 }
 
 

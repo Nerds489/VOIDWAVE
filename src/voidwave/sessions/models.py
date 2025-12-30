@@ -93,6 +93,7 @@ class Session(BaseModel):
             "workflow_state": self.workflow_state,
             "config": json.dumps(self.config.model_dump()),
             "metadata": json.dumps(self.metadata.model_dump()),
+            "updated_at": self.updated_at.isoformat(),
             "ended_at": self.ended_at.isoformat() if self.ended_at else None,
         }
 

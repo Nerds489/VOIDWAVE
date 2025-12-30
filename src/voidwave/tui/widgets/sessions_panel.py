@@ -114,9 +114,9 @@ class SessionsPanel(Widget):
         else:
             info_widget.update("[dim]No active session - Create one to track your work[/]")
 
-        # Update sessions table
+        # Update sessions table (clear rows only, preserve columns)
         table = self.query_one("#sessions-table", DataTable)
-        table.clear()
+        table.clear(columns=False)
 
         try:
             sessions = await self._manager.get_recent(limit=10)
@@ -177,8 +177,14 @@ class SessionsPanel(Widget):
             return
 
         try:
-            row_key = table.get_row_at(table.cursor_row)
-            session_id = table.get_row_key(row_key)
+            # Get the row key at cursor position from the ordered rows dict
+            row_keys = list(table.rows.keys())
+            if table.cursor_row >= len(row_keys):
+                self.notify("Invalid selection", severity="warning")
+                return
+
+            row_key = row_keys[table.cursor_row]
+            session_id = row_key.value  # The value we passed to key= when adding
 
             if session_id:
                 session = await self._manager.resume(str(session_id))
@@ -212,8 +218,14 @@ class SessionsPanel(Widget):
             return
 
         try:
-            row_key = table.get_row_at(table.cursor_row)
-            session_id = table.get_row_key(row_key)
+            # Get the row key at cursor position from the ordered rows dict
+            row_keys = list(table.rows.keys())
+            if table.cursor_row >= len(row_keys):
+                self.notify("Invalid selection", severity="warning")
+                return
+
+            row_key = row_keys[table.cursor_row]
+            session_id = row_key.value  # The value we passed to key= when adding
 
             if session_id:
                 deleted = await self._manager.delete(str(session_id))

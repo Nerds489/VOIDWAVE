@@ -154,7 +154,8 @@ class SessionManager:
             """
             UPDATE sessions
             SET name = :name, status = :status, workflow_state = :workflow_state,
-                config = :config, metadata = :metadata, ended_at = :ended_at
+                config = :config, metadata = :metadata, updated_at = :updated_at,
+                ended_at = :ended_at
             WHERE id = :id
             """,
             db_dict,

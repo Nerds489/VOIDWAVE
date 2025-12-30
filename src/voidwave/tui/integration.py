@@ -372,36 +372,36 @@ class TUIEventBridge:
 
     async def _on_chain_completed(self, data: dict) -> None:
         """Handle chain completed event."""
-        chain_id = data.get("chain_id", "")
+        chain_name = data.get("chain_name", data.get("chain_id", "Unknown"))
         duration = data.get("duration", 0)
         self.app.call_from_thread(self._update_tool_output, "completed", {
-            "tool": f"Chain: {chain_id}",
+            "tool": f"Chain: {chain_name}",
             "exit_code": 0,
             "duration": duration,
         })
         self.app.call_from_thread(self._show_notification, "notification", {
-            "message": f"Chain completed: {chain_id}",
+            "message": f"Chain completed: {chain_name}",
             "severity": "information",
         })
 
     async def _on_chain_failed(self, data: dict) -> None:
         """Handle chain failed event."""
-        chain_id = data.get("chain_id", "")
+        chain_name = data.get("chain_name", data.get("chain_id", "Unknown"))
         error = data.get("error", "Unknown error")
         self.app.call_from_thread(self._update_tool_output, "failed", {
-            "tool": f"Chain: {chain_id}",
+            "tool": f"Chain: {chain_name}",
             "error": error,
         })
         self.app.call_from_thread(self._show_notification, "notification", {
-            "message": f"Chain failed: {chain_id}",
+            "message": f"Chain failed: {chain_name}",
             "severity": "error",
         })
 
     async def _on_chain_cancelled(self, data: dict) -> None:
         """Handle chain cancelled event."""
-        chain_id = data.get("chain_id", "")
+        chain_name = data.get("chain_name", data.get("chain_id", "Unknown"))
         self.app.call_from_thread(self._update_tool_output, "output", {
             "tool": "chain",
-            "line": f"Chain cancelled: {chain_id}",
+            "line": f"Chain cancelled: {chain_name}",
             "level": "warning",
         })

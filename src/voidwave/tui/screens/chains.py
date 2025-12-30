@@ -228,6 +228,21 @@ class ChainsScreen(Screen):
         event_bus.on(Events.CHAIN_FAILED, self._on_chain_failed)
         event_bus.on(Events.CHAIN_CANCELLED, self._on_chain_cancelled)
 
+    def _unsubscribe_events(self) -> None:
+        """Unsubscribe from chain events."""
+        event_bus.off(Events.CHAIN_STARTED, self._on_chain_started)
+        event_bus.off(Events.CHAIN_STEP_STARTED, self._on_step_started)
+        event_bus.off(Events.CHAIN_STEP_COMPLETED, self._on_step_completed)
+        event_bus.off(Events.CHAIN_STEP_FAILED, self._on_step_failed)
+        event_bus.off(Events.CHAIN_STEP_SKIPPED, self._on_step_skipped)
+        event_bus.off(Events.CHAIN_COMPLETED, self._on_chain_completed)
+        event_bus.off(Events.CHAIN_FAILED, self._on_chain_failed)
+        event_bus.off(Events.CHAIN_CANCELLED, self._on_chain_cancelled)
+
+    async def on_unmount(self) -> None:
+        """Clean up when screen is unmounted."""
+        self._unsubscribe_events()
+
     # --------------------------------------------------------------------------
     # Event Handlers
     # --------------------------------------------------------------------------
@@ -421,7 +436,7 @@ class ChainsScreen(Screen):
             if (
                 query in chain.name.lower()
                 or query in chain.description.lower()
-                or any(query in tag for tag in chain.tags)
+                or any(query in tag.lower() for tag in chain.tags)
             ):
                 chain_list.add_option(Option(f"{chain.name}", id=chain.id))
 

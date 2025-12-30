@@ -32,6 +32,12 @@ class Capability(Enum):
     MITM = "mitm"
     OSINT = "osint"
     EXPLOITATION = "exploitation"
+    WEB_SCAN = "web_scan"
+    WEB_FUZZ = "web_fuzz"
+    SUBDOMAIN_ENUM = "subdomain_enum"
+    SQL_INJECTION = "sql_injection"
+    DIR_ENUM = "dir_enum"
+    FINGERPRINT = "fingerprint"
 
 
 @dataclass

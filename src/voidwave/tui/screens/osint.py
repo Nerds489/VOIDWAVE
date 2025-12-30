@@ -9,8 +9,11 @@ from textual.screen import Screen
 from textual.widgets import Static, Button, Input, DataTable, ListView, ListItem, Label
 from textual.binding import Binding
 
+from voidwave.core.logging import get_logger
 from voidwave.tui.widgets.tool_output import ToolOutput
 from voidwave.tui.helpers.preflight_runner import PreflightRunner
+
+logger = get_logger(__name__)
 
 
 class OsintScreen(Screen):
@@ -195,20 +198,31 @@ class OsintScreen(Screen):
 
         self._write_output(f"Running subfinder on {target}...")
 
-        proc = await asyncio.create_subprocess_exec(
-            "subfinder", "-d", target, "-silent",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await proc.communicate()
+        try:
+            from voidwave.tools.subfinder import SubfinderTool
 
-        for line in stdout.decode().split("\n"):
-            subdomain = line.strip()
-            if subdomain:
+            tool = SubfinderTool()
+            await tool.initialize()
+
+            result = await tool.execute(target, {"silent": True})
+        except Exception as e:
+            logger.error(f"Subfinder error: {e}")
+            self._write_output(f"Subfinder error: {e}", "error")
+            return
+
+        if result.success:
+            data = result.data
+            for subdomain in data.get("subdomains", []):
                 self._add_result("Subdomain", subdomain, "subfinder")
                 self._write_output(f"Found: {subdomain}", "success")
 
-        self._write_output("subfinder complete", "success")
+            summary = data.get("summary", {})
+            self._write_output(
+                f"subfinder complete: {summary.get('total_subdomains', 0)} subdomains found",
+                "success",
+            )
+        else:
+            self._write_output(f"subfinder failed: {result.errors}", "error")
 
     async def action_amass(self) -> None:
         """Run amass for subdomain enumeration."""

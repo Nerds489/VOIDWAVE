@@ -8,8 +8,11 @@ from textual.screen import Screen
 from textual.widgets import Static, Button, Input, DataTable, ListView, ListItem, Label, Select
 from textual.binding import Binding
 
+from voidwave.core.logging import get_logger
 from voidwave.tui.widgets.tool_output import ToolOutput
 from voidwave.tui.helpers.preflight_runner import PreflightRunner
+
+logger = get_logger(__name__)
 
 
 class ReconScreen(Screen):
@@ -203,24 +206,40 @@ class ReconScreen(Screen):
 
         self._write_output(f"Running Nikto on {target}...")
 
-        proc = await asyncio.create_subprocess_exec(
-            "nikto", "-h", target, "-nointeractive",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await proc.communicate()
+        try:
+            from voidwave.tools.nikto import NiktoTool
 
-        for line in stdout.decode().split("\n"):
-            line = line.strip()
-            if line.startswith("+"):
-                if "OSVDB" in line or "vulnerability" in line.lower():
-                    self._add_result("Vuln", line[2:], "nikto")
-                    self._write_output(line, "warning")
-                elif "Server:" in line:
-                    self._add_result("Server", line[2:], "nikto")
-                    self._write_output(line)
+            tool = NiktoTool()
+            await tool.initialize()
 
-        self._write_output("Nikto scan complete", "success")
+            result = await tool.execute(target, {"tuning": "12b"})
+        except Exception as e:
+            logger.error(f"Nikto scan error: {e}")
+            self._write_output(f"Nikto error: {e}", "error")
+            return
+
+        if result.success:
+            data = result.data
+            # Process vulnerabilities
+            for vuln in data.get("vulnerabilities", []):
+                desc = vuln.get("description", vuln.get("message", ""))
+                osvdb = vuln.get("osvdb", "")
+                self._add_result("Vuln", desc, f"OSVDB-{osvdb}" if osvdb else "nikto")
+                self._write_output(f"[VULN] {desc}", "warning")
+
+            # Process server info
+            for info in data.get("info", []):
+                msg = info.get("message", "")
+                if "Server:" in msg or "server" in msg.lower():
+                    self._add_result("Server", msg, "nikto")
+                    self._write_output(msg)
+
+            self._write_output(
+                f"Nikto complete: {data.get('summary', {}).get('total_vulnerabilities', 0)} vulns found",
+                "success",
+            )
+        else:
+            self._write_output(f"Nikto failed: {result.errors}", "error")
 
     async def action_gobuster_scan(self) -> None:
         """Run Gobuster directory brute force."""
@@ -231,24 +250,38 @@ class ReconScreen(Screen):
         wordlist = self._get_wordlist()
         self._write_output(f"Running Gobuster on {target}...")
 
-        proc = await asyncio.create_subprocess_exec(
-            "gobuster", "dir", "-u", target, "-w", wordlist, "-q",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await proc.communicate()
+        try:
+            from voidwave.tools.gobuster import GobusterTool
 
-        for line in stdout.decode().split("\n"):
-            line = line.strip()
-            if line and "(Status:" in line:
-                parts = line.split()
-                if parts:
-                    path = parts[0]
-                    status = line.split("(Status:")[1].split(")")[0] if "(Status:" in line else ""
-                    self._add_result("Directory", path, f"Status: {status}")
-                    self._write_output(f"Found: {path} [{status}]", "success")
+            tool = GobusterTool()
+            await tool.initialize()
 
-        self._write_output("Gobuster complete", "success")
+            result = await tool.execute(target, {
+                "mode": "dir",
+                "wordlist": wordlist,
+                "status_codes": "200,204,301,302,307,401,403",
+            })
+        except Exception as e:
+            logger.error(f"Gobuster scan error: {e}")
+            self._write_output(f"Gobuster error: {e}", "error")
+            return
+
+        if result.success:
+            data = result.data
+            for entry in data.get("results", []):
+                path = entry.get("path", "")
+                status = entry.get("status", "")
+                size = entry.get("size", "")
+                self._add_result("Directory", path, f"Status: {status}, Size: {size}")
+                self._write_output(f"Found: {path} [{status}]", "success")
+
+            summary = data.get("summary", {})
+            self._write_output(
+                f"Gobuster complete: {summary.get('total_found', 0)} directories found",
+                "success",
+            )
+        else:
+            self._write_output(f"Gobuster failed: {result.errors}", "error")
 
     async def action_ffuf_scan(self) -> None:
         """Run FFUF fuzzing."""
@@ -263,19 +296,38 @@ class ReconScreen(Screen):
         wordlist = self._get_wordlist()
         self._write_output(f"Running FFUF on {target}...")
 
-        proc = await asyncio.create_subprocess_exec(
-            "ffuf", "-u", target, "-w", wordlist, "-mc", "200,301,302,403",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await proc.communicate()
+        try:
+            from voidwave.tools.ffuf import FfufTool
 
-        for line in stdout.decode().split("\n"):
-            if "[Status:" in line:
-                self._add_result("Fuzz", line.strip(), "ffuf")
-                self._write_output(line.strip(), "success")
+            tool = FfufTool()
+            await tool.initialize()
 
-        self._write_output("FFUF complete", "success")
+            result = await tool.execute(target, {
+                "wordlist": wordlist,
+                "match_codes": [200, 204, 301, 302, 307, 401, 403],
+            })
+        except Exception as e:
+            logger.error(f"FFUF scan error: {e}")
+            self._write_output(f"FFUF error: {e}", "error")
+            return
+
+        if result.success:
+            data = result.data
+            for entry in data.get("results", []):
+                input_val = entry.get("input", {}).get("FUZZ", "")
+                url = entry.get("url", "")
+                status = entry.get("status", "")
+                length = entry.get("length", "")
+                self._add_result("Fuzz", input_val, f"Status: {status}, Len: {length}")
+                self._write_output(f"Found: {url} [{status}]", "success")
+
+            summary = data.get("summary", {})
+            self._write_output(
+                f"FFUF complete: {summary.get('total_results', 0)} results found",
+                "success",
+            )
+        else:
+            self._write_output(f"FFUF failed: {result.errors}", "error")
 
     async def action_dirb_scan(self) -> None:
         """Run Dirb directory scanner."""
@@ -308,27 +360,42 @@ class ReconScreen(Screen):
 
         self._write_output(f"Running Nuclei on {target}...")
 
-        proc = await asyncio.create_subprocess_exec(
-            "nuclei", "-u", target, "-severity", "low,medium,high,critical",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await proc.communicate()
+        try:
+            from voidwave.tools.nuclei import NucleiTool
 
-        for line in stdout.decode().split("\n"):
-            line = line.strip()
-            if line and "[" in line:
-                severity = "info"
-                if "[critical]" in line.lower():
-                    severity = "error"
-                elif "[high]" in line.lower():
-                    severity = "error"
-                elif "[medium]" in line.lower():
-                    severity = "warning"
-                self._add_result("Vuln", line, "nuclei")
-                self._write_output(line, severity)
+            tool = NucleiTool()
+            await tool.initialize()
 
-        self._write_output("Nuclei scan complete", "success")
+            result = await tool.execute(target, {
+                "severity": ["low", "medium", "high", "critical"],
+            })
+        except Exception as e:
+            logger.error(f"Nuclei scan error: {e}")
+            self._write_output(f"Nuclei error: {e}", "error")
+            return
+
+        if result.success:
+            data = result.data
+            level_map = {"critical": "error", "high": "error", "medium": "warning"}
+
+            for finding in data.get("findings", []):
+                template_name = finding.get("template_name", "")
+                severity = finding.get("severity", "info").lower()
+                matched_at = finding.get("matched_at", "")
+
+                level = level_map.get(severity, "info")
+                self._add_result("Vuln", template_name, f"[{severity}] {matched_at}")
+                self._write_output(f"[{severity.upper()}] {template_name}: {matched_at}", level)
+
+            summary = data.get("summary", {})
+            self._write_output(
+                f"Nuclei complete: {summary.get('total_findings', 0)} findings "
+                f"(C:{summary.get('critical', 0)} H:{summary.get('high', 0)} "
+                f"M:{summary.get('medium', 0)} L:{summary.get('low', 0)})",
+                "success",
+            )
+        else:
+            self._write_output(f"Nuclei failed: {result.errors}", "error")
 
     async def action_whatweb_scan(self) -> None:
         """Run WhatWeb fingerprinting."""
@@ -338,23 +405,39 @@ class ReconScreen(Screen):
 
         self._write_output(f"Running WhatWeb on {target}...")
 
-        proc = await asyncio.create_subprocess_exec(
-            "whatweb", "-a", "3", target,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await proc.communicate()
+        try:
+            from voidwave.tools.whatweb import WhatWebTool
 
-        output = stdout.decode()
-        # Parse technologies
-        techs = output.replace("\n", " ").split(",")
-        for tech in techs:
-            tech = tech.strip()
-            if tech and "[" in tech:
-                self._add_result("Tech", tech, "whatweb")
-                self._write_output(f"Detected: {tech}", "success")
+            tool = WhatWebTool()
+            await tool.initialize()
 
-        self._write_output("WhatWeb complete", "success")
+            result = await tool.execute(target, {"aggression": 3})
+        except Exception as e:
+            logger.error(f"WhatWeb scan error: {e}")
+            self._write_output(f"WhatWeb error: {e}", "error")
+            return
+
+        if result.success:
+            data = result.data
+            for tech in data.get("technologies", []):
+                name = tech.get("name", "")
+                version = tech.get("version", "")
+                details = tech.get("details", "")
+
+                display = name
+                if version:
+                    display = f"{name}/{version}"
+
+                self._add_result("Tech", display, details or "whatweb")
+                self._write_output(f"Detected: {display}", "success")
+
+            summary = data.get("summary", {})
+            self._write_output(
+                f"WhatWeb complete: {summary.get('total_technologies', 0)} technologies detected",
+                "success",
+            )
+        else:
+            self._write_output(f"WhatWeb failed: {result.errors}", "error")
 
     async def action_wpscan_scan(self) -> None:
         """Run WPScan for WordPress sites."""

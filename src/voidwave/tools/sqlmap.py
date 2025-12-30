@@ -75,10 +75,7 @@ class SqlmapTool(BaseToolWrapper):
         cmd = []
 
         # Target URL
-        if "=" in target or "?" in target:
-            cmd.extend(["-u", target])
-        else:
-            cmd.extend(["-u", target])
+        cmd.extend(["-u", target])
 
         # Level and risk
         level = options.get("level", self.sqlmap_config.level)

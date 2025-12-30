@@ -319,7 +319,7 @@ def hosts_to_urls(hosts: list[dict[str, Any]], scheme: str = "http") -> list[str
                 urls.append(f"https://{ip}:{port_num}")
         if not host.get("ports"):
             urls.append(f"{scheme}://{ip}")
-    return urls if urls else [f"{scheme}://{hosts[0].get('ip')}"] if hosts else []
+    return urls
 
 
 def first_http_url(hosts: list[dict[str, Any]]) -> str | None:
@@ -395,13 +395,13 @@ def extract_vulns_by_severity(
     Returns:
         List of vulnerability findings
     """
-    severity_order = ["info", "low", "medium", "high", "critical"]
-    min_idx = severity_order.index(min_severity.lower()) if min_severity.lower() in severity_order else 2
+    severity_order = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+    min_level = severity_order.get(min_severity.lower(), severity_order["medium"])
 
     findings = nuclei_data.get("findings", [])
     return [
         f for f in findings
-        if severity_order.index(f.get("severity", "info").lower()) >= min_idx
+        if severity_order.get(f.get("severity", "info").lower(), -1) >= min_level
     ]
 
 

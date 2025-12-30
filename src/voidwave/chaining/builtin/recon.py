@@ -117,7 +117,7 @@ subdomain_enum_chain = ChainDefinition(
             options={
                 "ports": "80,443",
                 "service_detection": True,
-                "skip_discovery": False,
+                "skip_discovery": True,
             },
             depends_on=["passive_enum"],
             condition=Condition(

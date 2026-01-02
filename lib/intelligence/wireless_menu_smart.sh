@@ -353,22 +353,14 @@ _do_select_target() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _do_wps_pixie() {
-    # Auto-prepare everything needed (interface, monitor, target)
-    if type -t auto_preflight &>/dev/null; then
-        auto_preflight "wps_pixie" || { preflight "wps_pixie" || return 1; }
-    else
-        preflight "wps_pixie" || return 1
-    fi
-
-    # Auto-scan and select if no target
-    if ! has_target 2>/dev/null || [[ ${#SCAN_WPS[@]} -eq 0 ]]; then
-        if type -t auto_target &>/dev/null; then
-            auto_target "$_MONITOR_IFACE" "wps" 20 || return 1
-        else
-            echo -e "    ${C_CYAN}Scanning for WPS networks...${C_RESET}"
-            scan_wps "$_MONITOR_IFACE" 20
-            select_wps_target || return 1
-        fi
+    # Pre-flight
+    preflight "wps_pixie" || return 1
+    
+    # Need target - auto-scan WPS if none
+    if ! has_target || [[ ${#SCAN_WPS[@]} -eq 0 ]]; then
+        echo -e "    ${C_CYAN}Scanning for WPS networks...${C_RESET}"
+        scan_wps "$_MONITOR_IFACE" 20
+        select_wps_target || return 1
     fi
     
     echo ""
@@ -387,19 +379,11 @@ _do_wps_pixie() {
 }
 
 _do_wps_bruteforce() {
-    if type -t auto_preflight &>/dev/null; then
-        auto_preflight "wps_bruteforce" || { preflight "wps_bruteforce" || return 1; }
-    else
-        preflight "wps_bruteforce" || return 1
-    fi
-
-    if ! has_target 2>/dev/null; then
-        if type -t auto_target &>/dev/null; then
-            auto_target "$_MONITOR_IFACE" "wps" 20 || return 1
-        else
-            scan_wps "$_MONITOR_IFACE" 20
-            select_wps_target || return 1
-        fi
+    preflight "wps_bruteforce" || return 1
+    
+    if ! has_target; then
+        scan_wps "$_MONITOR_IFACE" 20
+        select_wps_target || return 1
     fi
     
     echo ""
@@ -452,19 +436,11 @@ _do_wps_algorithm() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _do_pmkid() {
-    if type -t auto_preflight &>/dev/null; then
-        auto_preflight "pmkid" || { preflight "pmkid" || return 1; }
-    else
-        preflight "pmkid" || return 1
-    fi
-
-    if ! has_target 2>/dev/null; then
-        if type -t auto_target &>/dev/null; then
-            auto_target "$_MONITOR_IFACE" "clients" 15 || return 1
-        else
-            scan_networks "$_MONITOR_IFACE" 15
-            select_target || return 1
-        fi
+    preflight "pmkid" || return 1
+    
+    if ! has_target; then
+        scan_networks "$_MONITOR_IFACE" 15
+        select_target || return 1
     fi
     
     echo ""
@@ -489,27 +465,15 @@ _do_pmkid() {
 }
 
 _do_handshake() {
-    if type -t auto_preflight &>/dev/null; then
-        auto_preflight "handshake" || { preflight "handshake" || return 1; }
-    else
-        preflight "handshake" || return 1
+    preflight "handshake" || return 1
+    
+    if ! has_target; then
+        scan_networks "$_MONITOR_IFACE" 15
+        select_target || return 1
     fi
-
-    if ! has_target 2>/dev/null; then
-        if type -t auto_target &>/dev/null; then
-            auto_target "$_MONITOR_IFACE" "clients" 15 || return 1
-        else
-            scan_networks "$_MONITOR_IFACE" 15
-            select_target || return 1
-        fi
-    fi
-
-    # Auto-select client or let user choose
-    if type -t auto_client &>/dev/null; then
-        auto_client
-    else
-        select_client
-    fi
+    
+    # Check for clients
+    select_client
     
     echo ""
     echo -e "    ${C_CYAN}━━━ HANDSHAKE CAPTURE ━━━${C_RESET}"
@@ -575,26 +539,14 @@ _do_eviltwin_wpa() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _do_deauth() {
-    if type -t auto_preflight &>/dev/null; then
-        auto_preflight "deauth" || { preflight "deauth" || return 1; }
-    else
-        preflight "deauth" || return 1
+    preflight "deauth" || return 1
+    
+    if ! has_target; then
+        scan_networks "$_MONITOR_IFACE" 15
+        select_target || return 1
     fi
-
-    if ! has_target 2>/dev/null; then
-        if type -t auto_target &>/dev/null; then
-            auto_target "$_MONITOR_IFACE" "best" 15 || return 1
-        else
-            scan_networks "$_MONITOR_IFACE" 15
-            select_target || return 1
-        fi
-    fi
-
-    if type -t auto_client &>/dev/null; then
-        auto_client
-    else
-        select_client
-    fi
+    
+    select_client
     
     echo ""
     echo -e "    ${C_RED}━━━ DEAUTHENTICATION ATTACK ━━━${C_RESET}"

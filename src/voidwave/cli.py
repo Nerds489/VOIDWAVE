@@ -14,6 +14,7 @@ app = typer.Typer(
     name="voidwave",
     help="VOIDWAVE - Offensive Security Framework",
     add_completion=True,
+    invoke_without_command=True,  # Allow running without subcommand
 )
 
 console = Console()
@@ -28,19 +29,21 @@ def version_callback(value: bool):
         raise typer.Exit()
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     version: bool = typer.Option(
         None, "--version", "-v", callback=version_callback, is_eager=True
     ),
 ):
     """VOIDWAVE - Offensive Security Framework."""
-    pass
+    # If no subcommand given, launch TUI by default
+    if ctx.invoked_subcommand is None:
+        _launch_tui()
 
 
-@app.command()
-def tui():
-    """Launch the interactive TUI (default)."""
+def _launch_tui():
+    """Launch the interactive TUI."""
     try:
         from voidwave.tui.app import run_app
 
@@ -50,9 +53,15 @@ def tui():
             f"[red]Error: TUI dependencies not available: {e}[/red]", style="bold"
         )
         console.print(
-            "[yellow]Install with: uv pip install 'voidwave[tui]'[/yellow]"
+            "[yellow]Install with: pipx install 'voidwave[tui]'[/yellow]"
         )
         raise typer.Exit(1)
+
+
+@app.command()
+def tui():
+    """Launch the interactive TUI."""
+    _launch_tui()
 
 
 @app.command()

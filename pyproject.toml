@@ -58,7 +58,7 @@ docs = [
 ]
 
 [project.scripts]
-voidwave = "voidwave.cli:main"
+voidwave = "voidwave.cli:app"
 
 [project.entry-points."voidwave.tools"]
 # Built-in tools registered here

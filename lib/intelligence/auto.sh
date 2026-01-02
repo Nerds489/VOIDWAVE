@@ -289,6 +289,31 @@ score_target() {
 auto_select_target() {
     local mode="${1:-best}"
 
+    # WPS mode: iterate over SCAN_WPS array directly
+    if [[ "$mode" == "wps" ]]; then
+        if [[ ${#SCAN_WPS[@]} -eq 0 ]]; then
+            return 1
+        fi
+
+        # Prefer the first unlocked network
+        for entry in "${SCAN_WPS[@]}"; do
+            local bssid channel essid locked
+            IFS='|' read -r bssid channel essid locked _ <<< "$entry"
+            if [[ "$locked" != "Yes" ]]; then
+                TARGET_BSSID="$bssid"
+                TARGET_CHANNEL="$channel"
+                TARGET_ESSID="$essid"
+                TARGET_ENC="WPS"
+                return 0
+            fi
+        done
+
+        # Fallback: if all are locked, select the first one
+        IFS='|' read -r TARGET_BSSID TARGET_CHANNEL TARGET_ESSID _ <<< "${SCAN_WPS[0]}"
+        TARGET_ENC="WPS"
+        return 0
+    fi
+
     if [[ ${#SCAN_RESULTS[@]} -eq 0 ]]; then
         return 1
     fi
@@ -304,16 +329,6 @@ auto_select_target() {
         local score
 
         case "$mode" in
-            wps)
-                # Prefer WPS-enabled (check SCAN_WPS)
-                for wps in "${SCAN_WPS[@]:-}"; do
-                    if [[ "$wps" == "$bssid|"* ]]; then
-                        local locked
-                        locked=$(echo "$wps" | cut -d'|' -f4)
-                        [[ "$locked" != "Yes" ]] && ((score += 100))
-                    fi
-                done
-                ;;
             open)
                 # Only consider open networks
                 [[ "$enc" != *"OPN"* && "$enc" != *"OPEN"* ]] && { ((idx++)); continue; }
@@ -450,13 +465,13 @@ auto_network() {
 
     if [[ -z "$_DEFAULT_IFACE" ]]; then
         # Fallback: first interface with IP
-        _DEFAULT_IFACE=$(ip -4 addr 2>/dev/null | awk '/inet.*scope global/{gsub(/.*\s/, ""); print; exit}')
+        _DEFAULT_IFACE=$(ip -4 addr 2>/dev/null | awk '/inet.*scope global/{print $NF; exit}')
     fi
 
     [[ -z "$_DEFAULT_IFACE" ]] && { _auto_fail "No network interface found"; return 1; }
 
     # Get local IP
-    _LOCAL_IP=$(ip -4 addr show "$_DEFAULT_IFACE" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -1)
+    _LOCAL_IP=$(ip -4 addr show "$_DEFAULT_IFACE" 2>/dev/null | awk '/inet /{split($2, a, "/"); print a[1]; exit}')
 
     # Get subnet in CIDR
     _SUBNET=$(ip -4 addr show "$_DEFAULT_IFACE" 2>/dev/null | awk '/inet /{print $2}' | head -1)

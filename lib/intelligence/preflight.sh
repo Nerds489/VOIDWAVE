@@ -13,6 +13,9 @@
 [[ -n "${_VOIDWAVE_PREFLIGHT_LOADED:-}" ]] && return 0
 declare -r _VOIDWAVE_PREFLIGHT_LOADED=1
 
+# Source auto-detection module
+source "${BASH_SOURCE%/*}/auto.sh" 2>/dev/null || true
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # REQUIREMENT DEFINITIONS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -285,32 +288,101 @@ _can_autofix() {
 
 _do_autofix() {
     local -a reqs=("$@")
-    
+
     for req in "${reqs[@]}"; do
         case "$req" in
             interface)
-                echo -e "    ${C_CYAN}⟳ Auto-selecting interface...${C_RESET}"
-                local iface
-                iface=$(iw dev 2>/dev/null | awk '/Interface/{print $2; exit}')
-                if [[ -n "$iface" ]]; then
-                    _CURRENT_IFACE="$iface"
-                    echo -e "    ${C_GREEN}✓${C_RESET} Selected: $iface"
+                # Use smart auto-detection if available
+                if type -t auto_interface &>/dev/null; then
+                    auto_interface
+                else
+                    echo -e "    ${C_CYAN:-}⟳ Auto-selecting interface...${C_RESET:-}"
+                    local iface
+                    iface=$(iw dev 2>/dev/null | awk '/Interface/{print $2; exit}')
+                    if [[ -n "$iface" ]]; then
+                        _CURRENT_IFACE="$iface"
+                        echo -e "    ${C_GREEN:-}✓${C_RESET:-} Selected: $iface"
+                    fi
                 fi
                 ;;
             monitor_mode)
-                if [[ -n "${_CURRENT_IFACE:-}" ]]; then
-                    echo -e "    ${C_CYAN}⟳ Enabling monitor mode...${C_RESET}"
+                # Use smart auto-detection if available
+                if type -t auto_monitor &>/dev/null; then
+                    auto_monitor
+                elif [[ -n "${_CURRENT_IFACE:-}" ]]; then
+                    echo -e "    ${C_CYAN:-}⟳ Enabling monitor mode...${C_RESET:-}"
                     airmon-ng check kill &>/dev/null
                     if airmon-ng start "$_CURRENT_IFACE" &>/dev/null; then
                         sleep 1
                         _MONITOR_IFACE=$(ls /sys/class/net/ 2>/dev/null | grep -E "${_CURRENT_IFACE}mon|mon[0-9]" | head -1)
                         [[ -z "$_MONITOR_IFACE" ]] && _MONITOR_IFACE="${_CURRENT_IFACE}"
-                        echo -e "    ${C_GREEN}✓${C_RESET} Monitor mode: $_MONITOR_IFACE"
+                        echo -e "    ${C_GREEN:-}✓${C_RESET:-} Monitor mode: $_MONITOR_IFACE"
                     fi
                 fi
                 ;;
         esac
     done
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AUTO-PREPARE (No prompts - fully automatic)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Automatically prepare everything needed for an attack
+# This is the "just make it work" function
+# Args: $1 = attack type
+# Returns: 0 if ready, 1 if impossible to prepare
+auto_preflight() {
+    local attack="$1"
+
+    # Use auto_prepare from auto.sh if available
+    if type -t auto_prepare &>/dev/null; then
+        case "$attack" in
+            wps_*|wps)
+                auto_prepare "wps"
+                ;;
+            pmkid|handshake|*capture*)
+                auto_prepare "wireless"
+                ;;
+            deauth|amok|beacon*|dos)
+                auto_prepare "deauth"
+                ;;
+            scan*|recon*)
+                auto_prepare "scan"
+                ;;
+            exploit*|crack*|creds*)
+                auto_prepare "network"
+                ;;
+            *)
+                auto_prepare "full"
+                ;;
+        esac
+        return $?
+    fi
+
+    # Fallback to regular preflight with auto-fix
+    local reqs="${ATTACK_REQUIREMENTS[$attack]:-}"
+    [[ -z "$reqs" ]] && return 0
+
+    local -a missing=()
+
+    for req in $reqs; do
+        if ! _req_check_or "$req"; then
+            missing+=("$req")
+        fi
+    done
+
+    # Try to auto-fix what we can
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        _do_autofix "${missing[@]}"
+    fi
+
+    # Re-check
+    for req in $reqs; do
+        _req_check_or "$req" || return 1
+    done
+
+    return 0
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -345,6 +417,6 @@ ensure_monitor() {
 # EXPORTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-export -f preflight _req_check _req_check_or
+export -f preflight _req_check _req_check_or auto_preflight
 export -f require_root require_interface require_monitor
 export -f ensure_root ensure_interface ensure_monitor

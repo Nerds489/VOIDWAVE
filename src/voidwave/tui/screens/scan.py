@@ -335,14 +335,14 @@ class ScanScreen(Screen):
         output = self.query_one("#scan-output", Static)
         output.update(message)
 
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
+    def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         button_id = event.button.id
 
         if button_id == "btn-start-scan":
-            await self._start_scan()
+            self.run_worker(self._start_scan(), exclusive=True)
         elif button_id == "btn-stop-scan":
-            await self._stop_scan()
+            self.run_worker(self._stop_scan())
 
     async def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle row selection."""

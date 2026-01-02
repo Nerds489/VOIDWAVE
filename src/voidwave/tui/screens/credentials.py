@@ -359,14 +359,14 @@ class CredentialsScreen(Screen):
         speed_label.update(f"Speed: [yellow]{speed}[/]")
         recovered_label.update(f"Recovered: [green]{recovered}[/]/{total}")
 
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
+    def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         button_id = event.button.id
 
         if button_id == "btn-start":
-            await self._start_cracking()
+            self.run_worker(self._start_cracking(), exclusive=True)
         elif button_id == "btn-stop":
-            await self._stop_cracking()
+            self.run_worker(self._stop_cracking())
         elif button_id == "btn-load-file":
             self._load_hash_file()
 

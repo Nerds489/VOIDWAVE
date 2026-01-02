@@ -407,12 +407,12 @@ class ChainsScreen(Screen):
         if event.input.id == "search-input":
             self._filter_chains(event.value)
 
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
+    def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         if event.button.id == "btn-run":
-            await self._run_chain()
+            self.run_worker(self._run_chain(), exclusive=True)
         elif event.button.id == "btn-stop":
-            await self._stop_chain()
+            self.run_worker(self._stop_chain())
 
     async def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle step selection in table."""

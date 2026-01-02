@@ -155,14 +155,14 @@ class ReconScreen(Screen):
 
         return target
 
-    async def on_list_view_selected(self, event: ListView.Selected) -> None:
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Handle menu selection."""
         item_id = event.item.id
         for menu_id, _, action_name in self.MENU_ITEMS:
             if menu_id == item_id:
                 action_method = getattr(self, f"action_{action_name}", None)
                 if action_method:
-                    await action_method()
+                    self.run_worker(action_method(), exclusive=True)
                 break
 
     def _get_target(self) -> str:

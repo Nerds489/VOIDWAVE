@@ -121,20 +121,20 @@ class TrafficScreen(Screen):
         table = self.query_one("#packets-table", DataTable)
         table.add_columns("Time", "Source", "Dest", "Protocol", "Info")
 
-    async def on_list_view_selected(self, event: ListView.Selected) -> None:
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Handle menu selection."""
         item_id = event.item.id
         for menu_id, _, action_name in self.MENU_ITEMS:
             if menu_id == item_id:
                 action_method = getattr(self, f"action_{action_name}", None)
                 if action_method:
-                    await action_method()
+                    self.run_worker(action_method(), exclusive=True)
                 break
 
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
+    def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         if event.button.id == "stop-btn":
-            await self.action_stop_capture()
+            self.run_worker(self.action_stop_capture())
 
     def _get_interface(self) -> str:
         """Get the selected interface."""

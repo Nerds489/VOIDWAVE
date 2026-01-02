@@ -408,35 +408,39 @@ class WirelessScreen(Screen):
         output = self.query_one("#wireless-output", Static)
         output.update(message)
 
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
+    def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         button_id = event.button.id
 
         if button_id == "btn-refresh-iface":
-            selector = self.query_one("#interface-selector", InterfaceSelector)
-            await selector.refresh_interfaces()
-            self._write_output("[cyan]Interfaces refreshed[/]")
+            self.run_worker(self._refresh_interfaces())
 
         elif button_id == "btn-monitor-mode":
-            await self._toggle_monitor_mode()
+            self.run_worker(self._toggle_monitor_mode(), exclusive=True)
 
         elif button_id == "btn-start-scan":
-            await self._start_scan()
+            self.run_worker(self._start_scan(), exclusive=True)
 
         elif button_id == "btn-stop-scan":
-            await self._stop_scan()
+            self.run_worker(self._stop_scan())
 
         elif button_id == "btn-deauth":
-            await self._deauth_attack()
+            self.run_worker(self._deauth_attack(), exclusive=True)
 
         elif button_id == "btn-handshake":
-            await self._capture_handshake()
+            self.run_worker(self._capture_handshake(), exclusive=True)
 
         elif button_id == "btn-pmkid":
-            await self._pmkid_attack()
+            self.run_worker(self._pmkid_attack(), exclusive=True)
 
         elif button_id == "btn-wps":
-            await self._wps_attack()
+            self.run_worker(self._wps_attack(), exclusive=True)
+
+    async def _refresh_interfaces(self) -> None:
+        """Refresh available interfaces."""
+        selector = self.query_one("#interface-selector", InterfaceSelector)
+        await selector.refresh_interfaces()
+        self._write_output("[cyan]Interfaces refreshed[/]")
 
     async def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle network selection."""

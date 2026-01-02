@@ -476,9 +476,9 @@ auto_network() {
     # Get subnet in CIDR
     _SUBNET=$(ip -4 addr show "$_DEFAULT_IFACE" 2>/dev/null | awk '/inet /{print $2}' | head -1)
 
-    # Get gateway
-    _GATEWAY_IP=$(ip route 2>/dev/null | awk '/default.*'"$_DEFAULT_IFACE"'/{print $3; exit}')
-    [[ -z "$_GATEWAY_IP" ]] && _GATEWAY_IP=$(ip route 2>/dev/null | awk '/default/{print $3; exit}')
+    # Get gateway (use ip route filtering instead of awk pattern with embedded var)
+    _GATEWAY_IP=$(ip route show default dev "$_DEFAULT_IFACE" 2>/dev/null | awk '{print $3}')
+    [[ -z "$_GATEWAY_IP" ]] && _GATEWAY_IP=$(ip route show default 2>/dev/null | awk '{print $3; exit}')
 
     if [[ -n "$_LOCAL_IP" ]]; then
         _auto_ok "Network: $_LOCAL_IP via $_GATEWAY_IP ($_DEFAULT_IFACE)"

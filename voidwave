@@ -1,24 +1,5 @@
 #!/usr/bin/env bash
-# VOIDWAVE launcher - runs Python TUI by default
-# Falls back to bash CLI if Python not available
+# VOIDWAVE launcher - runs bash CLI
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Try Python TUI first (pipx installed or local)
-if command -v voidwave &>/dev/null; then
-    # Use pipx-installed version if available and not pointing to us
-    PIPX_VOIDWAVE=$(command -v voidwave 2>/dev/null)
-    if [[ -n "$PIPX_VOIDWAVE" && "$PIPX_VOIDWAVE" != "$0" && "$PIPX_VOIDWAVE" != "${SCRIPT_DIR}/voidwave" ]]; then
-        exec "$PIPX_VOIDWAVE" "$@"
-    fi
-fi
-
-# Try running directly with Python
-if command -v python3 &>/dev/null; then
-    if python3 -c "import voidwave" 2>/dev/null; then
-        exec python3 -m voidwave "$@"
-    fi
-fi
-
-# Fallback to bash CLI
 exec "${SCRIPT_DIR}/bin/voidwave" "$@"

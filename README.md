@@ -13,7 +13,7 @@
                     ░▒▓█ THE AIRWAVES BELONG TO THOSE WHO LISTEN █▓▒░
 ```
 
-[![Version](https://img.shields.io/badge/version-10.1.0-ff0040?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Nerds489/VOIDWAVE/releases)
+[![Version](https://img.shields.io/badge/version-10.2.0-ff0040?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Nerds489/VOIDWAVE/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge)](LICENSE)
 [![Bash](https://img.shields.io/badge/bash-5.0+-4EAA25?style=for-the-badge&logo=gnubash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Platform](https://img.shields.io/badge/platform-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://kernel.org)
@@ -323,7 +323,7 @@ VOIDWAVE/
 
 <div align="center">
 
-**VOIDWAVE** v10.1.0 • Apache-2.0
+**VOIDWAVE** v10.2.0 • Apache-2.0
 
 *The airwaves belong to those who listen*
 

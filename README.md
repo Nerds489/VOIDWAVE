@@ -15,13 +15,12 @@
 
 [![Version](https://img.shields.io/badge/version-10.1.0-ff0040?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Nerds489/VOIDWAVE/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Bash](https://img.shields.io/badge/bash-5.0+-4EAA25?style=for-the-badge&logo=gnubash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Platform](https://img.shields.io/badge/platform-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://kernel.org)
 
-**Offensive Security Framework** | **124 Integrated Tools** | **Intelligent Auto-Detection** | **Multi-Distro Support**
+**Offensive Security Framework** | **124 Tools** | **Zero Configuration** | **Just Works**
 
-[Installation](#-installation) • [Quick Start](#-quick-start) • [Features](#-features) • [Tools](#-tool-arsenal) • [Documentation](#-documentation)
+[Installation](#installation) • [Quick Start](#quick-start) • [Commands](#commands) • [Tools](#tool-arsenal)
 
 </div>
 
@@ -29,323 +28,248 @@
 
 ## What is VOIDWAVE?
 
-**VOIDWAVE** is an offensive security framework that unifies 124 security tools under an intelligent interface with automatic detection of interfaces, targets, and attack requirements. Built for penetration testers, red teamers, and security researchers who need tools that **just work**.
-
-### Two Interfaces, One Framework
-
-| Interface | Description | Best For |
-|:----------|:------------|:---------|
-| **Python TUI** | Modern terminal UI built with Textual | Visual operation, status monitoring |
-| **Bash CLI** | Full-featured command-line with interactive menus | Scripting, automation, quick attacks |
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  WIRELESS     │  WPA/WPA2/WPA3, WPS attacks, Evil Twin, deauth, PMKID      │
-│  SCANNING     │  Port scanning, service enumeration, host discovery        │
-│  CREDENTIALS  │  Password cracking, brute force, hash attacks, responder   │
-│  OSINT        │  Email harvesting, subdomain enum, social reconnaissance   │
-│  RECON        │  Web fuzzing, directory brute force, CMS scanning          │
-│  TRAFFIC      │  Packet capture, MITM attacks, ARP spoofing, sniffing      │
-│  EXPLOIT      │  Metasploit, SQLMap, searchsploit, payload generation      │
-│  STRESS       │  Load testing, SYN floods, network impairment              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Intelligent Auto-Detection
-
-VOIDWAVE's intelligence system eliminates manual configuration. The framework automatically:
-
-| Feature | What It Does |
-|:--------|:-------------|
-| **Interface Detection** | Finds wireless adapters, scores by driver capability (ath9k_htc, rtl8187 ranked highest) |
-| **Monitor Mode** | Auto-enables monitor mode when attacks require it |
-| **Target Selection** | Scans networks, scores by signal strength, encryption, and client count |
-| **Client Detection** | Discovers connected clients for targeted deauth attacks |
-| **Network Discovery** | Detects local IP, gateway, and subnet for non-wireless operations |
-| **Preflight Checks** | Validates all requirements before attacks, offers auto-fix for missing components |
+VOIDWAVE is an offensive security framework that **does the thinking for you**. No more manually enabling monitor mode, finding interfaces, scanning for targets, or hunting for clients. Just run the attack — VOIDWAVE handles the rest.
 
 ```bash
-# Old way: Manual everything
+# Old way
+airmon-ng check kill
 airmon-ng start wlan0
-airodump-ng wlan0mon
-# Copy BSSID, channel, select target manually...
+airodump-ng wlan0mon          # wait, watch, copy BSSID...
+airodump-ng -c 6 --bssid AA:BB:CC:DD:EE:FF wlan0mon  # find clients...
+aireplay-ng --deauth 0 -a AA:BB:CC:DD:EE:FF -c 11:22:33:44:55:66 wlan0mon
 
-# VOIDWAVE way: Just run the attack
-voidwave   # Select WPS Pixie → Auto-detects interface → Auto-scans → Auto-selects best target → Attack
+# VOIDWAVE way
+voidwave wifi deauth          # done
 ```
 
 ---
 
 ## Installation
 
-### Quick Install
-
 ```bash
-# Clone the repository
 git clone https://github.com/Nerds489/VOIDWAVE.git
 cd VOIDWAVE
 
-# Install VOIDWAVE (uses pipx for isolation)
+# Install VOIDWAVE
 ./install.sh
 
-# Install all security tools (124 tools with multi-method fallback)
+# Install security tools (124 tools)
 ./install-tools.sh install-all
 ```
-
-### Launch VOIDWAVE
-
-```bash
-# Interactive bash menu (recommended for attacks)
-sudo ./bin/voidwave
-
-# Or from system path after install
-sudo voidwave
-
-# Python TUI (modern visual interface)
-sudo $(which voidwave) tui
-```
-
-### Prerequisites
-
-The installer handles prerequisites automatically, but you can install them manually:
-
-```bash
-sudo ./install-tools.sh prerequisites
-```
-
-This installs: `curl`, `wget`, `git`, `python3-pip`, `pipx`, `golang-go`, `cargo`
 
 ---
 
 ## Quick Start
 
-### Interactive Mode (Recommended)
+```bash
+# Launch interactive menu
+sudo voidwave
+
+# Or use direct commands with auto-everything
+sudo voidwave wifi deauth     # auto: interface, monitor, AP, client
+sudo voidwave wifi capture    # auto: interface, monitor, AP selection
+sudo voidwave scan            # auto: discovers local network
+```
+
+---
+
+## Automation
+
+VOIDWAVE automatically handles requirements. No arguments needed — it figures it out:
+
+| What You Run | What VOIDWAVE Does |
+|:-------------|:-------------------|
+| `voidwave scan` | Detects local network, runs nmap scan |
+| `voidwave wifi status` | Finds wireless interface, shows mode |
+| `voidwave wifi monitor on` | Selects interface, enables monitor mode |
+| `voidwave wifi scan` | Selects interface, enables monitor, scans APs |
+| `voidwave wifi deauth` | All above + selects AP + finds clients + attacks |
+| `voidwave wifi capture` | All above + captures handshakes to file |
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  1. AUTO-INTERFACE    Find wireless adapters, pick the best one    │
+│  2. AUTO-MONITOR      Enable monitor mode if not already on        │
+│  3. AUTO-NETWORK      Detect local network for scanning            │
+│  4. AUTO-TARGET       Scan and select targets interactively        │
+│  5. AUTO-AP           Scan for access points, let you pick         │
+│  6. AUTO-CLIENT       Find connected clients on selected AP        │
+│  7. AUTO-INSTALL      Install missing tools on the fly             │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Commands
+
+### Network Scanning
+
+```bash
+voidwave scan                     # auto-detect network, scan it
+voidwave scan 192.168.1.0/24      # scan specific target
+voidwave scan -t 10.0.0.1         # scan single host
+```
+
+### WiFi Operations
+
+```bash
+voidwave wifi list                # list wireless interfaces
+voidwave wifi status              # show interface mode (auto-select)
+voidwave wifi monitor on          # enable monitor mode (auto-select)
+voidwave wifi monitor off         # disable monitor mode
+voidwave wifi scan                # scan for access points
+voidwave wifi deauth              # deauth attack (fully automated)
+voidwave wifi capture             # capture handshakes
+```
+
+### System
+
+```bash
+voidwave status                   # show system info and tool status
+voidwave config show              # show configuration
+voidwave config set log_level DEBUG
+voidwave wizard first             # first-time setup
+```
+
+### Flags
+
+```bash
+voidwave --help                   # show all commands
+voidwave --version                # show version
+voidwave --dry-run <cmd>          # preview without executing
+voidwave --quiet <cmd>            # suppress output
+voidwave --verbose <cmd>          # debug output
+voidwave --target <IP> scan       # specify target
+```
+
+---
+
+## Interactive Mode
+
+Launch without arguments for the full menu system:
 
 ```bash
 sudo voidwave
 ```
 
-Navigate with arrow keys, select attacks, and let the intelligence system handle the rest.
-
-### CLI Mode
-
-```bash
-# Quick network scan
-voidwave scan -t 192.168.1.0/24
-
-# Enable monitor mode
-voidwave wifi monitor on wlan0
-
-# Show system status
-voidwave status
-
-# Configuration
-voidwave config show
-voidwave config set log_level DEBUG
 ```
-
-### Common Workflows
-
-```bash
-# WiFi assessment
-sudo voidwave           # Interactive menu → Wireless → Select attack type
-
-# Network reconnaissance
-voidwave scan -t 10.0.0.1
-voidwave --json scan -t 192.168.1.0/24 > results.json
-
-# First-time setup wizard
-voidwave wizard first
+┌─────────────────────────────────────────────────────────────────────┐
+│  [1] WIRELESS      WPA/WPA2/WPS/Evil Twin/Deauth/PMKID             │
+│  [2] SCANNING      Port scans, service detection, host discovery   │
+│  [3] CREDENTIALS   Password cracking, brute force, responder       │
+│  [4] OSINT         Email harvesting, subdomain enum, recon         │
+│  [5] RECON         Web fuzzing, directory brute force, CMS scans   │
+│  [6] TRAFFIC       Packet capture, MITM, ARP spoofing              │
+│  [7] EXPLOIT       Metasploit, SQLMap, searchsploit                │
+│  [8] STRESS        Load testing, SYN floods                        │
+│  [9] STATUS        System info, tool status                        │
+│  [0] EXIT                                                          │
+└─────────────────────────────────────────────────────────────────────┘
 ```
-
----
-
-## Features
-
-### Intelligence System
-
-- **Auto-Interface** — Ranks adapters by chipset/driver for attack suitability
-- **Auto-Monitor** — Enables monitor mode transparently when needed
-- **Auto-Target** — Scans and selects optimal targets based on signal/encryption/clients
-- **Auto-Client** — Detects clients for targeted attacks
-- **Auto-Network** — Discovers network topology for non-wireless operations
-- **Preflight Validation** — Checks all requirements before attacks with auto-fix capability
-
-### Modern Architecture
-
-- **Dual Interface** — Python TUI (Textual) + Bash CLI with shared libraries
-- **Event-Driven** — Async architecture for real-time updates
-- **Plugin System** — Extensible tool and attack registration
-- **Session Memory** — Remembers targets, interfaces, and networks across sessions
-
-### Export & Reporting
-
-- **Multiple Formats** — JSON, CSV, HTML, PDF, Markdown
-- **Secure Storage** — Encrypted loot storage for captured credentials
-- **API Key Management** — System keyring integration for secure key storage
 
 ---
 
 ## Tool Arsenal
 
-VOIDWAVE integrates **124 security tools** across 9 categories:
+124 security tools across 9 categories:
 
-### Wireless (18 tools)
-| Tool | Purpose |
-|:-----|:--------|
-| aircrack-ng suite | WPA/WPA2/WEP cracking, packet capture, injection |
-| reaver / bully | WPS PIN attacks, Pixie-Dust |
-| wifite | Automated wireless auditing |
-| hcxdumptool / hcxtools | PMKID capture and conversion |
-| mdk4 | Deauth, beacon flood, authentication attacks |
-| hostapd / dnsmasq | Evil Twin, rogue AP attacks |
-| kismet | Wireless network detection |
+### Wireless
+`aircrack-ng` `airmon-ng` `airodump-ng` `aireplay-ng` `reaver` `bully` `wifite` `hcxdumptool` `hcxtools` `mdk4` `hostapd` `dnsmasq` `kismet` `pixiewps` `cowpatty` `wash` `macchanger` `iw`
 
-### Scanning (12 tools)
-| Tool | Purpose |
-|:-----|:--------|
-| nmap | Port scanning, service/OS detection |
-| masscan | High-speed port scanning |
-| rustscan | Fast port discovery with nmap integration |
-| zmap | Internet-scale scanning |
-| enum4linux | SMB/NetBIOS enumeration |
+### Scanning
+`nmap` `masscan` `rustscan` `zmap` `enum4linux` `nbtscan` `onesixtyone` `smbclient` `smbmap` `ldapsearch` `snmpwalk` `nfs-utils`
 
-### Credentials (13 tools)
-| Tool | Purpose |
-|:-----|:--------|
-| hashcat | GPU-accelerated password cracking |
-| john | CPU password cracking |
-| hydra / medusa | Network service brute forcing |
-| responder | LLMNR/NBT-NS/MDNS poisoning |
-| impacket | Windows credential extraction |
+### Credentials
+`hashcat` `john` `hydra` `medusa` `responder` `impacket` `crackmapexec` `evil-winrm` `kerbrute` `patator` `crowbar` `thc-pptp-bruter` `hash-identifier`
 
-### OSINT (15 tools)
-| Tool | Purpose |
-|:-----|:--------|
-| theHarvester | Email, subdomain, host discovery |
-| subfinder / amass | Subdomain enumeration |
-| recon-ng | OSINT framework |
-| sherlock / holehe | Username/email reconnaissance |
-| shodan | Internet device search |
+### OSINT
+`theHarvester` `subfinder` `amass` `recon-ng` `sherlock` `holehe` `spiderfoot` `maltego` `shodan` `censys` `emailharvester` `whois` `dnsrecon` `fierce` `dmitry`
 
-### Recon (16 tools)
-| Tool | Purpose |
-|:-----|:--------|
-| gobuster / ffuf / feroxbuster | Directory/file brute forcing |
-| nikto | Web server scanning |
-| nuclei | Vulnerability scanning |
-| wpscan | WordPress vulnerability scanning |
-| whatweb | Web technology identification |
+### Recon
+`gobuster` `ffuf` `feroxbuster` `dirb` `dirbuster` `nikto` `nuclei` `wpscan` `whatweb` `wafw00f` `httpx` `httprobe` `aquatone` `eyewitness` `gowitness` `arjun`
 
-### Traffic (10 tools)
-| Tool | Purpose |
-|:-----|:--------|
-| tcpdump / wireshark | Packet capture and analysis |
-| ettercap / bettercap | MITM attacks |
-| mitmproxy | HTTP/HTTPS interception |
-| arpspoof / dnsspoof | Traffic redirection |
+### Traffic
+`tcpdump` `wireshark` `tshark` `ettercap` `bettercap` `mitmproxy` `arpspoof` `dnsspoof` `sslstrip` `netsniff-ng`
 
-### Exploit (12 tools)
-| Tool | Purpose |
-|:-----|:--------|
-| metasploit | Exploitation framework |
-| sqlmap | SQL injection |
-| searchsploit | Exploit database search |
-| evil-winrm | Windows remote management |
-| chisel | TCP/UDP tunneling |
+### Exploit
+`metasploit` `sqlmap` `searchsploit` `commix` `xsser` `beef-xss` `social-engineer-toolkit` `veil` `empire` `covenant` `chisel` `ligolo-ng`
 
-### Stress (8 tools)
-| Tool | Purpose |
-|:-----|:--------|
-| hping3 | Packet crafting, SYN floods |
-| slowloris | HTTP DoS |
-| siege | HTTP load testing |
-| iperf3 | Bandwidth testing |
+### Stress
+`hping3` `slowloris` `siege` `ab` `wrk` `iperf3` `stress-ng` `t50`
 
-### Utility (20 tools)
-Core utilities: `curl`, `wget`, `git`, `proxychains`, `tor`, `tmux`, `jq`, `netcat`, and more.
+### Utility
+`curl` `wget` `git` `proxychains` `tor` `socat` `netcat` `tmux` `screen` `jq` `yq` `xxd` `binwalk` `foremost` `steghide` `exiftool` `pwncat` `rlwrap` `sshpass` `fcrackzip`
 
 ---
 
 ## Tool Installer
 
-The universal tool installer supports 9 installation methods with automatic fallback:
-
 ```bash
-# List all tools and their installation status
-./install-tools.sh list
-
-# Install everything
-./install-tools.sh install-all
-
-# Install by category
-./install-tools.sh category wireless
-./install-tools.sh category osint
-
-# Install specific tool
-./install-tools.sh install nmap
-
-# Search tools
-./install-tools.sh search harvest
-
-# Interactive category selection
-./install-tools.sh install-category
+./install-tools.sh list              # show all tools and status
+./install-tools.sh install-all       # install everything
+./install-tools.sh category wireless # install by category
+./install-tools.sh install nmap      # install specific tool
+./install-tools.sh search wifi       # search tools
 ```
 
-### Installation Methods
-
-| Method | Description |
-|:-------|:------------|
-| `pkg:` | System packages (apt, dnf, pacman, zypper, apk) |
-| `pipx:` / `pip:` | Python packages with isolated environments |
-| `pygithub:` | Python tools from GitHub (clone + venv + wrapper) |
-| `github:` | Binary releases from GitHub |
-| `go:` | Go install |
-| `cargo:` | Rust cargo install |
-| `snap:` / `flatpak:` | Universal Linux packages |
-| `gem:` | Ruby gems |
-| `git:` | Clone and build from source |
+Installation methods: `apt` `dnf` `pacman` `zypper` `apk` `pipx` `pip` `go` `cargo` `gem` `snap` `flatpak` `github releases` `git clone`
 
 ---
 
-## Wireless Capabilities
+## Supported Distros
 
-### Attack Types
+| Family | Distributions |
+|:-------|:--------------|
+| **Debian** | Debian, Ubuntu, Kali, Parrot, Linux Mint |
+| **Red Hat** | Fedora, RHEL, Rocky, AlmaLinux, CentOS |
+| **Arch** | Arch, Manjaro, BlackArch, EndeavourOS |
+| **SUSE** | openSUSE Leap, Tumbleweed |
+| **Alpine** | Alpine Linux |
+| **Void** | Void Linux |
 
-| Attack | Methods |
-|:-------|:--------|
-| **WPS** | Pixie-Dust, PIN brute force, null PIN, known PINs database |
-| **WPA/WPA2** | Handshake capture, PMKID capture, dictionary attack |
-| **WPA3** | Transition mode downgrade attacks |
-| **Evil Twin** | Captive portal, WPA honeypot, credential harvesting |
-| **DoS** | Deauthentication, beacon flood, authentication flood |
-| **WEP** | ARP replay, ChopChop, fragmentation |
+---
+
+## Wireless Attacks
+
+| Attack | Description |
+|:-------|:------------|
+| **WPS Pixie-Dust** | Offline WPS PIN recovery |
+| **WPS Brute Force** | Online PIN enumeration |
+| **WPA Handshake** | 4-way handshake capture + crack |
+| **PMKID** | Clientless WPA attack |
+| **Deauth** | Client disconnection |
+| **Evil Twin** | Rogue AP with captive portal |
+| **Beacon Flood** | Fake network spam |
+| **WEP** | Legacy encryption attacks |
 
 ### Recommended Adapters
 
-| Chipset | Driver | Monitor | Injection | Band |
-|:--------|:-------|:-------:|:---------:|:----:|
-| Atheros AR9271 | ath9k_htc | ✓ | ✓ | 2.4 GHz |
-| Ralink RT3070 | rt2800usb | ✓ | ✓ | 2.4 GHz |
-| Realtek RTL8812AU | rtl8812au | ✓ | ✓ | Dual-band |
-| MediaTek MT7612U | mt76x2u | ✓ | ✓ | Dual-band |
+| Chipset | Driver | Injection |
+|:--------|:-------|:---------:|
+| Atheros AR9271 | ath9k_htc | ✓ |
+| Ralink RT3070 | rt2800usb | ✓ |
+| Realtek RTL8812AU | rtl8812au | ✓ |
+| MediaTek MT7612U | mt76x2u | ✓ |
 
 ---
 
-## Supported Distributions
+## Configuration
 
-| Family | Distributions | Package Manager |
-|:-------|:--------------|:----------------|
-| **Debian** | Debian, Ubuntu, Kali, Parrot, Linux Mint | apt |
-| **Red Hat** | Fedora, RHEL, Rocky, AlmaLinux, CentOS | dnf/yum |
-| **Arch** | Arch, Manjaro, BlackArch, EndeavourOS | pacman |
-| **SUSE** | openSUSE Leap, Tumbleweed | zypper |
-| **Alpine** | Alpine Linux | apk |
-| **Void** | Void Linux | xbps |
+```bash
+voidwave config show              # all settings
+voidwave config get log_level     # get value
+voidwave config set key value     # set value
+voidwave config reset             # restore defaults
+```
 
-The installer automatically detects your distribution and maps package names accordingly.
+| Setting | Default | Description |
+|:--------|:--------|:------------|
+| `log_level` | INFO | DEBUG, INFO, WARNING, ERROR |
+| `file_logging` | true | Write logs to file |
+| `confirm_dangerous` | true | Prompt before dangerous ops |
+| `warn_public_ip` | true | Warn on public IP targets |
 
 ---
 
@@ -354,46 +278,9 @@ The installer automatically detects your distribution and maps package names acc
 | Requirement | Details |
 |:------------|:--------|
 | **OS** | Linux (kernel 4.x+) |
-| **Python** | 3.11+ (for TUI) |
-| **Bash** | 5.0+ (for CLI) |
-| **Privileges** | Root for wireless/packet capture operations |
-| **WiFi Adapter** | Monitor mode + packet injection support (for wireless attacks) |
-
----
-
-## Configuration
-
-### CLI Configuration
-
-```bash
-voidwave config show                    # Show all settings
-voidwave config get log_level           # Get specific value
-voidwave config set log_level DEBUG     # Set value
-voidwave config edit                    # Open in editor
-voidwave config reset                   # Reset to defaults
-```
-
-### Key Settings
-
-| Setting | Description | Default |
-|:--------|:------------|:--------|
-| `log_level` | DEBUG, INFO, WARNING, ERROR | INFO |
-| `file_logging` | Write logs to file | true |
-| `confirm_dangerous` | Prompt before dangerous ops | true |
-| `warn_public_ip` | Warn if targeting public IPs | true |
-
-### API Keys (Optional)
-
-For enhanced OSINT functionality:
-
-| Service | Purpose |
-|:--------|:--------|
-| Shodan | Internet device search |
-| Censys | Attack surface monitoring |
-| VirusTotal | Malware/URL scanning |
-| WPScan | WordPress vulnerability database |
-| Hunter.io | Email discovery |
-| SecurityTrails | DNS intelligence |
+| **Shell** | Bash 5.0+ |
+| **Privileges** | Root for wireless/packet capture |
+| **WiFi Adapter** | Monitor mode + injection (for wireless attacks) |
 
 ---
 
@@ -401,74 +288,43 @@ For enhanced OSINT functionality:
 
 ```
 VOIDWAVE/
-├── src/voidwave/           # Python TUI application
-│   ├── tui/                # Textual screens (wireless, scan, osint, etc.)
-│   ├── automation/         # AUTO-* handlers
-│   ├── orchestration/      # Event bus & workflow control
-│   ├── detection/          # Tool detection
-│   ├── tools/              # Tool wrappers with output parsing
-│   ├── export/             # Multi-format report generation
-│   ├── db/                 # SQLite persistence
-│   ├── loot/               # Encrypted credential storage
-│   └── config/             # Settings & API key management
-├── lib/                    # Bash CLI libraries
-│   ├── intelligence/       # Auto-detection system
-│   │   ├── auto.sh         # Interface/target/client auto-detection
-│   │   ├── preflight.sh    # Requirement validation
-│   │   └── targeting.sh    # Network scanning & selection
-│   ├── core.sh             # Core functions
-│   ├── ui.sh               # Terminal UI helpers
-│   ├── config.sh           # Configuration management
-│   ├── detection.sh        # System/tool detection
-│   ├── wireless/           # Wireless attack modules
-│   ├── attacks/            # Attack implementations
-│   └── menus/              # Interactive menus
-├── bin/voidwave            # Main CLI entry point
-├── install.sh              # VOIDWAVE installer
-├── install-tools.sh        # Universal tool installer (124 tools)
-└── tests/                  # Test suite
+├── bin/voidwave          # CLI entry point
+├── voidwave              # Launcher wrapper
+├── lib/                  # Bash libraries
+│   ├── automation.sh     # Auto-* functions
+│   ├── core.sh           # Core utilities
+│   ├── wireless.sh       # Wireless operations
+│   ├── detection.sh      # System detection
+│   ├── config.sh         # Configuration
+│   ├── ui.sh             # Terminal UI
+│   ├── menus/            # Interactive menus
+│   ├── attacks/          # Attack modules
+│   └── intelligence/     # Smart targeting
+├── install.sh            # VOIDWAVE installer
+├── install-tools.sh      # Tool installer (124 tools)
+└── src/voidwave/         # Python TUI (optional)
 ```
 
 ---
 
-## Documentation
-
-| Document | Description |
-|:---------|:------------|
-| [CHANGELOG.md](CHANGELOG.md) | Version history and release notes |
-| [TUI_QUICK_REFERENCE.md](TUI_QUICK_REFERENCE.md) | TUI keyboard shortcuts |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution guidelines |
-| [SECURITY.md](SECURITY.md) | Security policy and reporting |
-| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Community guidelines |
-
----
-
-## Legal Disclaimer
+## Legal
 
 > **For authorized security testing only.**
 >
-> Unauthorized access to computer systems is illegal. Users are solely responsible for ensuring they have proper authorization before using this tool. The authors assume no liability for misuse or damage caused by this software.
+> Unauthorized access to computer systems is illegal. You are responsible for ensuring proper authorization before use.
 >
-> By using VOIDWAVE, you agree to use it only for:
-> - Authorized penetration testing engagements
-> - Security research on systems you own or have permission to test
-> - Educational purposes in controlled environments
-> - Capture The Flag (CTF) competitions
-
----
-
-## Credits
-
-VOIDWAVE evolved from NETREAPER, representing a complete architectural rewrite combining a modern Python TUI with a battle-tested Bash CLI. Thanks to the security community and the developers behind aircrack-ng, hashcat, nmap, metasploit, and the 120+ other tools integrated into this framework.
+> Authorized uses:
+> - Penetration testing with written permission
+> - Security research on systems you own
+> - Educational environments
+> - CTF competitions
 
 ---
 
 <div align="center">
 
-**VOIDWAVE** v10.1.0 • Apache-2.0 License
+**VOIDWAVE** v10.1.0 • Apache-2.0
 
 *The airwaves belong to those who listen*
-
-[![GitHub Stars](https://img.shields.io/github/stars/Nerds489/VOIDWAVE?style=social)](https://github.com/Nerds489/VOIDWAVE)
 
 </div>

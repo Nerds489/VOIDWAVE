@@ -5,7 +5,8 @@
 # Installs the VOIDWAVE bash CLI to your system.
 #
 # Usage:
-#   ./install.sh              # Install to ~/.local/bin
+#   sudo ./install.sh         # Install system-wide to /usr/local/bin (recommended)
+#   ./install.sh --user       # Install to ~/.local/bin (user only)
 #   ./install.sh --uninstall  # Remove installation
 #   ./install.sh --tools      # Also install security tools
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -14,7 +15,6 @@ set -euo pipefail
 
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly VERSION=$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "unknown")
-readonly BIN_DIR="$HOME/.local/bin"
 
 # Colors
 RED='\033[0;31m'
@@ -28,6 +28,22 @@ log()     { echo -e "${CYAN}[*]${RESET} $*"; }
 success() { echo -e "${GREEN}[✓]${RESET} $*"; }
 warn()    { echo -e "${YELLOW}[!]${RESET} $*"; }
 error()   { echo -e "${RED}[✗]${RESET} $*" >&2; }
+
+# Determine install location
+USER_MODE=false
+if [[ "${1:-}" == "--user" || "${2:-}" == "--user" ]]; then
+    USER_MODE=true
+fi
+
+if [[ "$USER_MODE" == true ]]; then
+    BIN_DIR="$HOME/.local/bin"
+elif [[ $EUID -eq 0 ]]; then
+    BIN_DIR="/usr/local/bin"
+else
+    # Not root and not --user, default to user install with warning
+    BIN_DIR="$HOME/.local/bin"
+    USER_MODE=true
+fi
 
 #═══════════════════════════════════════════════════════════════════════════════
 # INSTALL
@@ -49,15 +65,19 @@ install_voidwave() {
         fi
     fi
 
-    # Remove existing symlink/file
-    if [[ -e "$BIN_DIR/voidwave" ]]; then
-        rm -f "$BIN_DIR/voidwave"
-    fi
+    # Remove existing symlinks from both locations
+    for dir in "/usr/local/bin" "$HOME/.local/bin"; do
+        if [[ -e "$dir/voidwave" ]]; then
+            rm -f "$dir/voidwave" 2>/dev/null || true
+        fi
+    done
+
+    # Set permissions
+    chmod +x "$SCRIPT_DIR/voidwave"
+    chmod +x "$SCRIPT_DIR/bin/voidwave"
 
     # Create symlink
     ln -sf "$SCRIPT_DIR/voidwave" "$BIN_DIR/voidwave"
-    chmod +x "$SCRIPT_DIR/voidwave"
-    chmod +x "$SCRIPT_DIR/bin/voidwave"
 
     # Verify
     if [[ -L "$BIN_DIR/voidwave" ]]; then
@@ -67,8 +87,8 @@ install_voidwave() {
         exit 1
     fi
 
-    # Check PATH
-    if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+    # Check PATH for user installs
+    if [[ "$USER_MODE" == true ]] && [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
         warn "$BIN_DIR not in PATH"
         echo ""
         echo "Add to your shell config:"
@@ -79,7 +99,13 @@ install_voidwave() {
     echo ""
     success "VOIDWAVE ${VERSION} installed"
     echo ""
-    echo "  Run: voidwave"
+    if [[ "$USER_MODE" == true ]]; then
+        echo "  Run: voidwave"
+        warn "Note: 'sudo voidwave' won't work with user install"
+        echo "  For sudo support, reinstall with: sudo ./install.sh"
+    else
+        echo "  Run: sudo voidwave"
+    fi
     echo "  Help: voidwave --help"
     echo ""
 }
@@ -93,11 +119,13 @@ uninstall_voidwave() {
     echo -e "${BOLD}VOIDWAVE Uninstaller${RESET}"
     echo ""
 
-    # Remove symlink
-    if [[ -e "$BIN_DIR/voidwave" ]]; then
-        rm -f "$BIN_DIR/voidwave"
-        success "Removed $BIN_DIR/voidwave"
-    fi
+    # Remove symlinks from both locations
+    for dir in "/usr/local/bin" "$HOME/.local/bin"; do
+        if [[ -e "$dir/voidwave" ]]; then
+            rm -f "$dir/voidwave" 2>/dev/null || sudo rm -f "$dir/voidwave" 2>/dev/null || true
+            success "Removed $dir/voidwave"
+        fi
+    done
 
     # Remove pipx if installed
     if command -v pipx &>/dev/null; then
@@ -135,23 +163,38 @@ install_tools() {
 # MAIN
 #═══════════════════════════════════════════════════════════════════════════════
 
-case "${1:-}" in
-    --uninstall|-u)
+# Parse arguments (handle --user appearing anywhere)
+ACTION=""
+for arg in "$@"; do
+    case "$arg" in
+        --uninstall|-u) ACTION="uninstall" ;;
+        --tools|-t)     ACTION="tools" ;;
+        --help|-h)      ACTION="help" ;;
+        --user)         ;; # Already handled above
+        *)              ;;
+    esac
+done
+
+case "$ACTION" in
+    uninstall)
         uninstall_voidwave
         ;;
-    --tools|-t)
+    tools)
         install_voidwave
         install_tools
         ;;
-    --help|-h)
+    help)
         echo "VOIDWAVE Installer"
         echo ""
-        echo "Usage: ./install.sh [OPTIONS]"
+        echo "Usage:"
+        echo "  sudo ./install.sh         Install system-wide (recommended)"
+        echo "  ./install.sh --user       Install to ~/.local/bin"
         echo ""
         echo "Options:"
-        echo "  --uninstall, -u   Remove VOIDWAVE"
-        echo "  --tools, -t       Install + security tools"
-        echo "  --help, -h        Show this help"
+        echo "  --user          Install to ~/.local/bin instead of /usr/local/bin"
+        echo "  --uninstall, -u Remove VOIDWAVE"
+        echo "  --tools, -t     Install + security tools"
+        echo "  --help, -h      Show this help"
         ;;
     *)
         install_voidwave

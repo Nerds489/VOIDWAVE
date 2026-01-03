@@ -50,11 +50,14 @@ voidwave wifi deauth          # done
 git clone https://github.com/Nerds489/VOIDWAVE.git
 cd VOIDWAVE
 
-# Install VOIDWAVE
-./install.sh
+# Install VOIDWAVE (system-wide, works with sudo)
+sudo ./install.sh
+
+# Or install to ~/.local/bin (user only)
+./install.sh --user
 
 # Install security tools (124 tools)
-./install-tools.sh install-all
+sudo ./install-tools.sh install-all
 ```
 
 ---
@@ -301,8 +304,7 @@ VOIDWAVE/
 │   ├── attacks/          # Attack modules
 │   └── intelligence/     # Smart targeting
 ├── install.sh            # VOIDWAVE installer
-├── install-tools.sh      # Tool installer (124 tools)
-└── src/voidwave/         # Python TUI (optional)
+└── install-tools.sh      # Tool installer (124 tools)
 ```
 
 ---

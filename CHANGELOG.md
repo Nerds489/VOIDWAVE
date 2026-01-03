@@ -2,6 +2,38 @@
 
 All notable changes to VOIDWAVE.
 
+## [10.2.2] - 2025-01-03
+
+### Changed
+- **Replaced TUI installer with simple bash CLI installer** - No more Python dependencies
+- Install script now defaults to system-wide installation (`/usr/local/bin`)
+- Added `--user` flag for user-local installation to `~/.local/bin`
+
+### Fixed
+- `sudo voidwave` now works out of the box with system-wide install
+
+---
+
+## [10.2.1] - 2025-01-03
+
+### Fixed
+- **Wrapper symlink resolution** - Fixed issue where symlinks weren't properly resolved for system-wide installs
+
+---
+
+## [10.2.0] - 2025-01-03
+
+### Changed
+- **README rewritten** - Focus on bash CLI with automation features
+- Added automation documentation showing auto-detect capabilities
+- Removed Python TUI references from main documentation
+
+### Added
+- **Auto-detection system** - Automatically detects interfaces, networks, and targets
+- **Auto-fix capabilities** - Enables monitor mode and installs missing tools on the fly
+
+---
+
 ## [10.1.0] - 2025-12-30
 
 ### Added
